@@ -10,11 +10,28 @@ import cors from 'cors';
 import multer from 'multer';
 import { mkdirSync, existsSync } from 'fs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Robust directory resolution
+const getCurrentDirname = () => {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch (err) {
+    return process.cwd();
+  }
+};
+
+const __dirname = getCurrentDirname();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'itqan-secret-key-123';
-const db = new Database('accounting.db');
+const dbPath = path.resolve(process.cwd(), 'accounting.db');
+console.log(`[DB] Initializing database at: ${dbPath}`);
+let db: Database.Database;
+try {
+  db = new Database(dbPath);
+  console.log('[DB] Database connection successful');
+} catch (err) {
+  console.error('[DB] FATAL: Failed to connect to database:', err);
+  process.exit(1);
+}
 
 const parseAccountId = (val: any) => {
   if (val === undefined || val === null || val === '') return null;
@@ -617,10 +634,12 @@ async function startServer() {
   const upload = multer({ storage });
   
   // Create uploads directory if not exists
-  if (!existsSync('uploads')) {
-    mkdirSync('uploads');
+  const uploadsDir = path.resolve(process.cwd(), 'uploads');
+  if (!existsSync(uploadsDir)) {
+    console.log(`[SERVER] Creating uploads directory at: ${uploadsDir}`);
+    mkdirSync(uploadsDir, { recursive: true });
   }
-  app.use('/uploads', express.static('uploads'));
+  app.use('/uploads', express.static(uploadsDir));
 
   // --- API ROUTES ---
 
@@ -2572,10 +2591,22 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.resolve(process.cwd(), 'dist');
+    const indexPath = path.join(distPath, 'index.html');
+    console.log(`[PROD] Serving static files from: ${distPath}`);
+    
+    if (!existsSync(distPath)) {
+      console.warn(`[PROD] WARNING: dist directory not found at ${distPath}`);
+    }
+
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        console.error(`[PROD] ERROR: index.html not found at ${indexPath}`);
+        res.status(404).send('Application build not found. Please run build first.');
+      }
     });
   }
 

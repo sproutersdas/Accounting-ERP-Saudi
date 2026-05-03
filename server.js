@@ -10,7 +10,15 @@ console.log('Current Dir:', process.cwd());
 console.log('Entry Dir:', __dirname);
 
 try {
-  const bundlePath = path.join(__dirname, 'dist-server', 'index.cjs');
+  console.log('Checking dependencies...');
+  const Database = (await import('better-sqlite3')).default;
+  console.log('Dependency check: better-sqlite3 loaded successfully.');
+} catch (err) {
+  console.error('FATAL: Failed to load better-sqlite3. This is a native module and may require build tools on your platform.', err);
+}
+
+try {
+  const bundlePath = path.join(__dirname, 'dist-server', 'index.js');
   console.log('Loading bundled server logic from:', bundlePath);
   await import(bundlePath);
   console.log('Server module loaded successfully.');
