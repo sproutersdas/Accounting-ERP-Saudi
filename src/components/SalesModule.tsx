@@ -1053,6 +1053,14 @@ const QuotationsView = ({ initialParams, draftMode = false }: { initialParams?: 
   const [loading, setLoading] = useState(true);
   const [expandedQuotes, setExpandedQuotes] = useState<string[]>([]);
 
+  const toggleExpand = (quoteNumber: string) => {
+    setExpandedQuotes(prev => 
+      prev.includes(quoteNumber) 
+        ? prev.filter(q => q !== quoteNumber) 
+        : [...prev, quoteNumber]
+    );
+  };
+
   // Tab change handler for QuotationsView
   const handleViewChange = (newView: 'list' | 'create' | 'edit' | 'details' | 'compare') => {
     setView(newView);
