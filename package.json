@@ -7,7 +7,7 @@
     "dev": "tsx server.ts",
     "build": "vite build && npm run build:server",
     "build:server": "esbuild server.ts --bundle --platform=node --target=node20 --outfile=dist-server/index.cjs --external:better-sqlite3 --external:fsevents --external:vite",
-    "start": "NODE_ENV=production node entry.js",
+    "start": "NODE_ENV=production node server.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
