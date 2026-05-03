@@ -1,19 +1,38 @@
 import * as React from "react"
 import { Input as InputPrimitive } from "@base-ui/react/input"
+import { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+export interface InputProps extends Omit<React.ComponentProps<"input">, 'size'> {
+  icon?: LucideIcon
+  size?: 'default' | 'sm'
+}
+
+function Input({ className, type, icon: Icon, size = 'default', ...props }: InputProps) {
   return (
-    <InputPrimitive
-      type={type}
-      data-slot="input"
-      className={cn(
-        "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
-        className
+    <div className="relative w-full group">
+      {Icon && (
+        <div className={cn(
+          "absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors",
+          size === 'sm' && "left-3"
+        )}>
+          <Icon className={cn("h-5 w-5", size === 'sm' && "h-4 w-4")} />
+        </div>
       )}
-      {...props}
-    />
+      <InputPrimitive
+        type={type}
+        data-slot="input"
+        className={cn(
+          "flex w-full rounded-[24px] border border-slate-200 bg-white px-4 py-2 text-sm ring-offset-background transition-all outline-none placeholder:text-slate-400 hover:border-slate-300 focus-visible:border-blue-500 focus-visible:ring-4 focus-visible:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm",
+          size === 'default' && "h-12",
+          size === 'sm' && "h-9 rounded-[16px] px-3 text-xs",
+          Icon && (size === 'sm' ? "pl-9" : "pl-12"),
+          className
+        )}
+        {...props}
+      />
+    </div>
   )
 }
 

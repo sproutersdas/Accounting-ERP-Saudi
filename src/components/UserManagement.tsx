@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 import { 
   Plus, 
@@ -103,24 +103,24 @@ function UserForm({
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">Identity Tag (Username)</label>
               <Input 
+                icon={UserIcon}
                 value={username} 
                 onChange={e => setUsername(e.target.value)} 
                 disabled={readOnly}
-                className="h-11 font-bold bg-slate-50 border-slate-100 focus:bg-white" 
                 placeholder="e.g. k.alghamdi"
               />
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">System Privilege</label>
-              <Select value={role} onValueChange={setRole} disabled={readOnly}>
-                <SelectTrigger className="h-11 font-bold bg-slate-50 border-slate-100">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user" className="text-xs font-bold uppercase">Standard User</SelectItem>
-                  <SelectItem value="admin" className="text-xs font-bold uppercase tracking-wider text-blue-600">Strategic Administrator</SelectItem>
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={[
+                  { label: "Standard User", value: "user" },
+                  { label: "Strategic Administrator", value: "admin" }
+                ]}
+                value={role}
+                onValueChange={!readOnly ? setRole : () => null}
+                className="w-full"
+              />
             </div>
           </div>
 
@@ -128,17 +128,14 @@ function UserForm({
             <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-1">
               {user ? 'Update Password (Leave blank for no change)' : 'Initial Security Key'}
             </label>
-            <div className="relative">
-              <Input 
-                type="password"
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-                disabled={readOnly}
-                className="h-11 font-bold bg-slate-50 border-slate-100 pl-10" 
-                placeholder={readOnly ? "••••••••" : (user ? "••••••••" : "Minimum 8 characters")}
-              />
-              <Lock className="absolute left-3 top-3.5 h-4 w-4 text-slate-300" />
-            </div>
+            <Input 
+              icon={Lock}
+              type="password"
+              value={password} 
+              onChange={e => setPassword(e.target.value)} 
+              disabled={readOnly}
+              placeholder={readOnly ? "••••••••" : (user ? "••••••••" : "Minimum 8 characters")}
+            />
           </div>
 
 
@@ -440,18 +437,18 @@ export function UserProfile() {
                  <div className="space-y-1.5">
                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Public Alias</label>
                    <Input 
+                      icon={UserIcon}
                       value={username} 
                       onChange={e => setUsername(e.target.value)} 
-                      className="h-11 font-bold bg-white border-slate-200" 
                    />
                  </div>
                  <div className="space-y-1.5">
                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">New Security Key</label>
                    <Input 
+                      icon={Lock}
                       type="password"
                       value={password} 
                       onChange={e => setPassword(e.target.value)} 
-                      className="h-11 font-bold bg-white border-slate-200" 
                       placeholder="••••••••"
                    />
                  </div>

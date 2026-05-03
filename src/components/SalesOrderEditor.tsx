@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { Plus, Trash2, Image as ImageIcon, Printer, Save, FileText, Briefcase, PackageCheck, ShoppingCart, AlertCircle, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,8 +27,8 @@ interface OrderItem {
   subCategory?: string;
   description: string;
   unit: string;
-  qty: number;
-  unitPrice: number;
+  qty: number | '';
+  unitPrice: number | '';
   amount: number;
   image?: string;
 }
@@ -76,17 +77,20 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
   const [categories, setCategories] = useState<{id: number, name: string}[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [company, setCompany] = useState<CompanyDetails | null>(null);
+  const [approvedQuotations, setApprovedQuotations] = useState<any[]>([]);
+  const [selectedQuotationId, setSelectedQuotationId] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [templateRes, customerRes, companyRes, categoryRes] = await Promise.all([
+        const [templateRes, customerRes, companyRes, categoryRes, quoteRes] = await Promise.all([
           fetch('/api/project-template-items'),
           fetch('/api/customers'),
           fetch('/api/company-details'),
-          fetch('/api/project-categories')
+          fetch('/api/project-categories'),
+          fetch('/api/quotations')
         ]);
 
         const safeJson = async (res: Response) => {
@@ -102,10 +106,18 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
         const customerList = await safeJson(customerRes);
         const companies = await safeJson(companyRes);
         const cats = await safeJson(categoryRes);
+        const quotes = await safeJson(quoteRes);
 
         if (Array.isArray(templates)) setTemplateItems(templates);
         if (Array.isArray(customerList)) setCustomers(customerList);
         if (Array.isArray(cats)) setCategories(cats);
+        if (Array.isArray(quotes)) {
+            setApprovedQuotations(quotes.filter((q: any) => 
+              q.status === 'confirmed' || 
+              q.status === 'SalesOrder' || 
+              q.status === 'Approved'
+            ));
+        }
         if (Array.isArray(companies) && companies.length > 0) {
           setCompany(companies[0]);
         } else if (companies && !Array.isArray(companies) && companies.name) {
@@ -121,9 +133,20 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
             setTo(data.customer_name);
             setCustomerId(data.customer_id?.toString() || '');
             setProject(data.project_name);
-            setRevision(data.revision || '0');
-            setDiscount(data.discount || 0);
-            setValidUntil(data.valid_until || '');
+            setQuotationNoFromRef(data.revision || '');
+            setDiscount(data.discount || '');
+            setDescription(data.description || '');
+            
+            const matchedCustomer = customerList.find((c: any) => c.name === data.customer_name || c.id === data.customer_id);
+            if (matchedCustomer) {
+              setAttn(matchedCustomer.contact_person || '');
+              setAddress(matchedCustomer.address || '');
+              setEmail(matchedCustomer.email || '');
+            } else {
+              setAttn('');
+              setAddress('');
+              setEmail('');
+            }
             
             // Reconstruct sections from items
             const newSections: OrderSection[] = [];
@@ -142,7 +165,7 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                 } else if (currentSection) {
                   currentSection.items.push({
                     id: 'item-' + Math.random().toString(36).substr(2, 9),
-                    sn: item.sn,
+                    sn: `${currentSection.sn.split('.')[0]}.${currentSection.items.length + 1}`,
                     subCategory: item.sub_category,
                     description: item.description,
                     unit: item.unit,
@@ -184,6 +207,7 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
   const [to, setTo] = useState('');
   const [attn, setAttn] = useState('');
   const [address, setAddress] = useState('');
+  const [description, setDescription] = useState('');
   const [project, setProject] = useState('');
   const [email, setEmail] = useState('');
   
@@ -191,9 +215,8 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
   const [orderNo, setOrderNo] = useState('SO-' + (Math.floor(Math.random() * 9000) + 1000).toString());
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [customerId, setCustomerId] = useState('');
-  const [validUntil, setValidUntil] = useState(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-  const [revision, setRevision] = useState('0');
-  const [discount, setDiscount] = useState(0);
+  const [quotationNoFromRef, setQuotationNoFromRef] = useState('');
+  const [discount, setDiscount] = useState<number | ''>('');
   const [isSaved, setIsSaved] = useState(false);
 
   const handleCustomerChange = (customerName: string) => {
@@ -204,6 +227,62 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
       setAddress(selected.address || '');
       setEmail(selected.email || '');
       setCustomerId(selected.id.toString());
+    }
+  };
+
+  const handleQuotationSelect = async (quoteIdStr: string) => {
+    setSelectedQuotationId(quoteIdStr);
+    if (!quoteIdStr) return;
+    
+    try {
+        const res = await fetch(`/api/quotations/${quoteIdStr}`);
+        if (!res.ok) throw new Error('Failed to load quotation');
+        const data = await res.json();
+        
+        setTo(data.customer_name);
+        handleCustomerChange(data.customer_name);
+        setProject(data.project_name || '');
+        setDescription(data.notes || data.description || '');
+        setQuotationNoFromRef(data.quotation_number || '');
+        setDiscount(data.discount || '');
+        
+        // Populate sections
+        const newSections: OrderSection[] = [];
+        let currentSection: OrderSection | null = null;
+        
+        if (data.items && Array.isArray(data.items)) {
+            data.items.forEach((item: any) => {
+                if (item.is_lot) {
+                    currentSection = {
+                        id: 'sec-' + Math.random().toString(36).substr(2, 9),
+                        sn: item.sn,
+                        title: item.description,
+                        items: []
+                    };
+                    newSections.push(currentSection);
+                } else if (currentSection) {
+                    currentSection.items.push({
+                        id: 'item-' + Math.random().toString(36).substr(2, 9),
+                        sn: `${currentSection.sn.split('.')[0]}.${currentSection.items.length + 1}`,
+                        subCategory: item.sub_category,
+                        description: item.description,
+                        unit: item.unit,
+                        qty: item.qty,
+                        unitPrice: item.unit_price,
+                        amount: item.amount,
+                        image: item.image_url
+                    });
+                }
+            });
+        }
+        
+        if (newSections.length > 0) {
+            setSections(newSections);
+        }
+        
+        toast.success(`Populated from Quotation: ${data.quotation_number}`);
+    } catch (err) {
+        toast.error('Failed to populate from quotation');
     }
   };
 
@@ -223,14 +302,27 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
   };
 
   const updateSection = (id: string, field: keyof OrderSection, value: any) => {
-    setSections(sections.map(s => s.id === id ? { ...s, [field]: value } : s));
+    setSections(sections.map(s => {
+      if (s.id === id) {
+        const updated = { ...s, [field]: value };
+        if (field === 'sn') {
+          const baseSn = value.split('.')[0];
+          updated.items = updated.items.map((it, idx) => ({
+             ...it,
+             sn: `${baseSn}.${idx + 1}`
+          }));
+        }
+        return updated;
+      }
+      return s;
+    }));
   };
 
   const addItemToSection = (sectionId: string) => {
     setSections(sections.map(sec => {
       if (sec.id === sectionId) {
         const nextItemNum = sec.items.length + 1;
-        const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum.toString().padStart(2, '0')}`;
+        const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum}`;
         return {
           ...sec,
           items: [...sec.items, {
@@ -239,8 +331,8 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
             subCategory: '',
             description: '',
             unit: 'Item',
-            qty: 1,
-            unitPrice: 0,
+            qty: '',
+            unitPrice: '',
             amount: 0
           }]
         };
@@ -253,7 +345,7 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
     setSections(sections.map(sec => {
         if (sec.id === sectionId) {
             const nextItemNum = sec.items.length + 1;
-            const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum.toString().padStart(2, '0')}`;
+            const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum}`;
             return {
                 ...sec,
                 items: [...sec.items, {
@@ -262,9 +354,9 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                     subCategory: template.name,
                     description: template.description,
                     unit: template.unit,
-                    qty: 1,
-                    unitPrice: template.default_unit_price,
-                    amount: template.default_unit_price
+                    qty: '',
+                    unitPrice: '',
+                    amount: 0
                 }]
             };
         }
@@ -276,7 +368,11 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
   const removeItem = (sectionId: string, itemId: string) => {
     setSections(sections.map(sec => {
         if (sec.id === sectionId) {
-            return { ...sec, items: sec.items.filter(it => it.id !== itemId) };
+            const newItems = sec.items.filter(it => it.id !== itemId).map((it, idx) => ({
+                ...it,
+                sn: `${sec.sn.split('.')[0]}.${idx + 1}`
+            }));
+            return { ...sec, items: newItems };
         }
         return sec;
     }));
@@ -289,9 +385,15 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
             ...sec,
             items: sec.items.map(it => {
                 if (it.id === itemId) {
-                    const updated = { ...it, [field]: value };
+                    let finalValue = value;
+                    if ((field === 'qty' || field === 'unitPrice') && value !== '') {
+                        finalValue = Math.max(0, parseFloat(value) || 0);
+                    }
+                    const updated = { ...it, [field]: finalValue };
                     if (field === 'qty' || field === 'unitPrice') {
-                        updated.amount = (updated.qty || 0) * (updated.unitPrice || 0);
+                        const q = typeof updated.qty === 'number' ? updated.qty : 0;
+                        const p = typeof updated.unitPrice === 'number' ? updated.unitPrice : 0;
+                        updated.amount = q * p;
                     }
                     return updated;
                 }
@@ -323,7 +425,7 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
   const totalAmount = sections.reduce((sum, sec) => 
     sum + sec.items.reduce((secSum, it) => secSum + it.amount, 0), 0
   );
-  const afterDiscount = totalAmount - discount;
+  const afterDiscount = totalAmount - (Number(discount) || 0);
   const vatAmount = afterDiscount * 0.15;
   const grandTotal = afterDiscount + vatAmount;
 
@@ -392,9 +494,9 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
 
     let yPos = 60;
 
-    dMeta(doc, yPos);
+    dMeta(doc, yPos); // Meta info helper
     
-    yPos += 38;
+    yPos += 45;
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text('Sales Order', pageWidth / 2, yPos, { align: 'center' });
@@ -409,48 +511,58 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
 
     const summaryRows = sections.map(sec => {
       const secTotal = sec.items.reduce((sum, it) => sum + it.amount, 0);
-      return [sec.sn + ' ' + sec.title, '1', 'Item', secTotal.toLocaleString() + '.00'];
+      return [sec.sn, sec.title, '1', 'Item', secTotal.toLocaleString() + '.00'];
     });
 
     autoTable(doc, {
       startY: yPos + 15,
       margin: { top: 60, bottom: 30, left: margin, right: margin },
-      head: [['PROJECT SUMMARY', 'Qty', 'UNIT', 'Saudi Riyal']],
+      head: [[{ content: 'PROJECT SUMMARY', colSpan: 4 }, { content: 'Saudi Riyal', colSpan: 1, styles: { halign: 'right' } }]],
       body: summaryRows,
       theme: 'grid',
-      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontSize: 10, fontStyle: 'bold' },
-      styles: { fontSize: 8, fontStyle: 'bold' },
+      headStyles: { fillColor: [176, 196, 222], textColor: [0, 0, 0], fontSize: 10, fontStyle: 'bold' },
+      styles: { fontSize: 8, fontStyle: 'bold', textColor: [0, 0, 0] },
       columnStyles: { 
-        0: { cellWidth: pageWidth - margin * 2 - 75 },
-        1: { halign: 'center', cellWidth: 15 },
-        2: { halign: 'center', cellWidth: 20 },
-        3: { halign: 'right', cellWidth: 40 } 
+        0: { halign: 'center', cellWidth: 15 },
+        1: { cellWidth: pageWidth - margin * 2 - 85 },
+        2: { halign: 'center', cellWidth: 10 },
+        3: { halign: 'center', cellWidth: 20 },
+        4: { halign: 'right', cellWidth: 40 } 
       }
     });
 
     let currentY = (doc as any).lastAutoTable.finalY + 5;
     
     const summaryRowLine = (l: string, v: string, y: number) => {
-        doc.setFillColor(248, 250, 252);
+        doc.setFillColor(240, 240, 240);
         doc.rect(margin, y - 4, pageWidth - margin * 2, 6, 'F');
+        doc.setDrawColor(0);
+        doc.rect(margin, y - 4, pageWidth - margin * 2, 6, 'S');
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         doc.setTextColor(0);
-        doc.text(l, 105, y, { align: 'center' });
-        doc.text(v, pageWidth - margin - 2, y, { align: 'right' });
+        doc.text(l, pageWidth / 2, y + 0.5, { align: 'center' });
+        doc.text(v, pageWidth - margin - 5, y + 0.5, { align: 'right' });
     };
 
     summaryRowLine('Total Amount', totalAmount.toLocaleString() + '.00', currentY);
     summaryRowLine('Special Discount', discount.toLocaleString() + '.00', currentY + 6);
-    summaryRowLine('Net Amount', afterDiscount.toLocaleString() + '.00', currentY + 12);
-    summaryRowLine('VAT (15%)', vatAmount.toLocaleString() + '.00', currentY + 18);
-    summaryRowLine('Grand Total', grandTotal.toLocaleString() + '.00', currentY + 24);
+    summaryRowLine('After Discount', afterDiscount.toLocaleString() + '.00', currentY + 12);
     
-    currentY += 34;
+    if (vatAmount > 0) {
+      summaryRowLine('VAT (15%)', vatAmount.toLocaleString() + '.00', currentY + 18);
+      summaryRowLine('Grand Total', grandTotal.toLocaleString() + '.00', currentY + 24);
+      currentY += 12;
+    }
+    
+    currentY += 22;
     doc.setFontSize(8);
-    doc.setDrawColor(226, 232, 240);
-    doc.rect(margin, currentY - 4, pageWidth - margin * 2, 8);
-    doc.text(`Order Value Amount in words: ${amountInWords}`, margin + 3, currentY + 1);
+    doc.setDrawColor(0);
+    doc.rect(margin, currentY - 4, pageWidth - margin * 2, 6, 'S');
+    doc.setFillColor(240, 240, 240);
+    doc.rect(margin, currentY - 4, pageWidth - margin * 2, 6, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Order Value Amount in words: ${amountInWords}`, margin + 2, currentY);
 
     yPos = currentY + 10;
 
@@ -463,10 +575,15 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
         }
 
         yPos += 10;
-        doc.setFontSize(11);
+        doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(30, 41, 59);
-        doc.text(`${sec.sn} ${sec.title}`, margin, yPos);
+        doc.setFillColor(200, 200, 200);
+        doc.rect(margin, yPos - 5, pageWidth - margin * 2, 8, 'F');
+        doc.setDrawColor(0);
+        doc.rect(margin, yPos - 5, pageWidth - margin * 2, 8, 'S');
+        doc.setTextColor(0);
+        doc.text(`${sec.sn} ${sec.title}`, margin + 2, yPos + 0.5);
+        yPos += 3;
         
         const secItems = sec.items.map(it => [
             it.sn,
@@ -482,52 +599,40 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
         const secTotal = sec.items.reduce((sum, it) => sum + it.amount, 0);
 
         autoTable(doc, {
-            startY: yPos + 5,
+            startY: yPos,
             margin: { top: 60, bottom: 30, left: margin, right: margin },
-            head: [['S/N', 'IMG', 'Sub Category', 'Description', 'UNIT', 'Qty', 'Unit Price', 'Amount']],
+            head: [['S/N', 'Image', 'Sub Category', 'Description', 'UNIT', 'Qty', 'Unit Price', 'Amount']],
             body: [
                 ...secItems,
                 [
-                    '', 
-                    '', 
-                    '',
-                    `SUB TOTAL FOR ${sec.title}`, 
-                    '', 
-                    '', 
-                    '', 
-                    secTotal.toLocaleString() + '.00'
+                    { content: `SUB TOTAL FOR ${sec.title.toUpperCase()}`, colSpan: 7, styles: { halign: 'center', fontStyle: 'bold', fillColor: [240, 240, 240] } },
+                    { content: secTotal.toLocaleString() + '.00', styles: { halign: 'right', fontStyle: 'bold', fillColor: [240, 240, 240] } }
                 ]
             ],
             theme: 'grid',
-            headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold' },
-            styles: { fontSize: 8, minCellHeight: 12, valign: 'middle' },
+            headStyles: { fillColor: [176, 196, 222], textColor: [0, 0, 0], fontStyle: 'bold' },
+            styles: { fontSize: 8, minCellHeight: 12, valign: 'middle', textColor: [0,0,0], lineColor: [0, 0, 0], lineWidth: 0.1 },
             columnStyles: {
-                0: { cellWidth: 12 },
-                1: { cellWidth: 20 },
-                2: { cellWidth: 35 },
-                3: { cellWidth: pageWidth - margin * 2 - 157 },
-                4: { cellWidth: 15, halign: 'center' },
-                5: { cellWidth: 15, halign: 'center' },
-                6: { cellWidth: 30, halign: 'right' },
-                7: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+                0: { cellWidth: 10 },
+                1: { cellWidth: 18 },
+                2: { cellWidth: 25 },
+                3: { cellWidth: pageWidth - margin * 2 - 117 },
+                4: { cellWidth: 10, halign: 'center' },
+                5: { cellWidth: 10, halign: 'center' },
+                6: { cellWidth: 22, halign: 'right' },
+                7: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
             },
             didParseCell: (data) => {
-                if (data.section === 'body' && data.column.index === 1) {
+                if (data.section === 'body' && data.column.index === 1 && data.row.index < secItems.length) {
                     data.cell.text = [''];
                 }
             },
             didDrawCell: (data) => {
-                if (data.section === 'body' && data.row.index === secItems.length) {
-                    if (data.column.index === 3) {
-                        data.cell.styles.halign = 'right';
-                    }
-                }
-
                 if (data.section === 'body' && data.column.index === 1 && data.cell.raw && data.row.index < secItems.length) {
                     const imgData = data.cell.raw as string;
                     if (imgData && imgData.startsWith('data:image')) {
                         try {
-                            doc.addImage(imgData, 'JPEG', data.cell.x + 2, data.cell.y + 1, 16, 10);
+                            doc.addImage(imgData, 'JPEG', data.cell.x + 2, data.cell.y + 1, 14, 10);
                         } catch (e) {}
                     }
                 }
@@ -551,34 +656,46 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
     const margin = 15;
     const pageWidth = d.internal.pageSize.getWidth();
     
-    d.setFontSize(9);
+    // Draw box for meta info
+    d.setDrawColor(0);
+    d.setLineWidth(0.5);
+    d.rect(margin, y - 5, pageWidth - margin * 2, 45, 'S');
+
+    d.setFontSize(8);
     d.setFont('helvetica', 'bold');
-    d.text('To:', margin, y);
+    d.text('To:', margin + 2, y);
     d.setFont('helvetica', 'normal');
     d.text(d.splitTextToSize(to || '', 70), margin + 25, y);
     
     d.setFont('helvetica', 'bold');
-    d.text('Concern person:', margin, y + 6);
+    d.text('Attn:', margin + 2, y + 6);
     d.setFont('helvetica', 'normal');
     d.text(attn || '', margin + 25, y + 6);
     
     d.setFont('helvetica', 'bold');
-    d.text('Address:', margin, y + 12);
+    d.text('Address:', margin + 2, y + 12);
     d.setFont('helvetica', 'normal');
     d.text(d.splitTextToSize(address || '', 70), margin + 25, y + 12);
     
     d.setFont('helvetica', 'bold');
-    d.text('Project:', margin, y + 25);
+    d.text('Project:', margin + 2, y + 25);
     d.setFont('helvetica', 'normal');
     d.text(project || '', margin + 25, y + 25);
     
     d.setFont('helvetica', 'bold');
-    d.text('Email:', margin, y + 31);
+    d.text('Email:', margin + 2, y + 31);
     d.setTextColor(37, 99, 235);
     d.text(email || '', margin + 25, y + 31);
     d.setTextColor(0);
 
-    const rCol = pageWidth - 65;
+    if (description) {
+        d.setFont('helvetica', 'bold');
+        d.text('Description:', margin + 2, y + 37);
+        d.setFont('helvetica', 'normal');
+        d.text(d.splitTextToSize(description, 70), margin + 25, y + 37);
+    }
+
+    const rCol = pageWidth - 70;
     const metaLine = (l: string, v: string, py: number) => {
         d.setFont('helvetica', 'bold');
         d.text(l, rCol, py);
@@ -586,11 +703,13 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
         d.text(v, rCol + 30, py);
     };
 
+    // Draw vertical middle divider line
+    d.line(pageWidth / 2 + 10, y - 5, pageWidth / 2 + 10, y + 40);
+
     metaLine('Date:', new Date(date).toLocaleDateString('en-GB'), y);
     metaLine('Order No:', orderNo, y + 6);
     metaLine('Customer ID:', customerId, y + 12);
-    metaLine('Valid Until:', validUntil ? new Date(validUntil).toLocaleDateString('en-GB') : '', y + 18);
-    metaLine('Revision:', revision, y + 24);
+    metaLine('Quotation No:', quotationNoFromRef, y + 18);
   };
 
   const handleSaveOrder = async () => {
@@ -629,13 +748,16 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
         total_amount: grandTotal,
         discount: discount,
         tax_amount: vatAmount,
-        valid_until: validUntil,
-        revision: revision,
+        revision: quotationNoFromRef,
+        description: description,
         items: flattenedItems
       };
 
-      const res = await fetch('/api/sales-orders', {
-        method: 'POST',
+      const url = id ? `/api/sales-orders/${id}` : '/api/sales-orders';
+      const method = id ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -655,9 +777,8 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
   if (loading) return <div className="h-64 flex items-center justify-center text-slate-400 font-mono text-xs uppercase tracking-widest animate-pulse">Initializing Order Editor...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
-        <CardHeader className="bg-white border-b border-slate-100 py-6 px-10 flex flex-row items-center justify-between">
+    <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden w-full max-w-[100%] mx-auto">
+      <CardHeader className="bg-white border-b border-slate-100 py-6 px-10 flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-xl font-black uppercase tracking-widest text-blue-900">{id ? 'Edit Sales Order' : 'Prepare Sales Order'}</CardTitle>
             <p className="text-[10px] font-bold text-blue-600 uppercase tracking-[0.2em] mt-1 flex items-center gap-2">
@@ -669,11 +790,11 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
               <Button onClick={() => {
                 generatePDF();
                 toast.info('Preparing Format for Printing...');
-              }} className="h-9 px-6 text-[10px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-md gap-2 rounded-xl">
+              }} className="h-9 px-6 text-[10px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-md gap-2 rounded-md">
                 <Printer className="h-3.5 w-3.5" /> Print Order (A4)
               </Button>
             )}
-            <Button onClick={handleSaveOrder} className="h-9 px-6 text-[10px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-md gap-2 rounded-xl">
+            <Button onClick={handleSaveOrder} className="h-9 px-6 text-[10px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-md gap-2 rounded-md">
               <Save className="h-3.5 w-3.5" /> Commit Order
             </Button>
           </div>
@@ -683,34 +804,45 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
             <div className="lg:col-span-2 space-y-6 border-r border-blue-50 pr-10">
               <div className="flex items-center gap-2 mb-4">
-                <div className="h-5 w-1.5 bg-blue-600 rounded-full"></div>
+                <div className="h-5 w-1.5 bg-blue-600 rounded-sm"></div>
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-900">Customer Intake</h3>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {!id && (
+                  <div className="md:col-span-2 space-y-1.5 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
+                    <label className="text-[9px] font-black uppercase text-blue-600 tracking-[0.1em] flex items-center gap-2">
+                       <FileText className="h-3 w-3" /> Auto-Populate from Approved Quotation
+                    </label>
+                    <Combobox
+                      options={approvedQuotations.map(q => ({ label: `${q.quotation_number} (Rev: ${q.revision}) - ${q.project_name || 'No Project'}`, value: q.id.toString() }))}
+                      value={selectedQuotationId}
+                      onValueChange={handleQuotationSelect}
+                      placeholder="Select Approved Quotation..."
+                      className="h-10 border-blue-200 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-md w-full"
+                    />
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Client Name</label>
-                  <Select value={to} onValueChange={handleCustomerChange}>
-                    <SelectTrigger className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs uppercase rounded-xl">
-                      <SelectValue placeholder="Select Client" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers.map(c => (
-                        <SelectItem key={c.id} value={c.name} className="text-[10px] font-bold py-2 uppercase">{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Combobox
+                    options={customers.map(c => ({ label: c.name, value: c.name }))}
+                    value={to}
+                    onValueChange={handleCustomerChange}
+                    placeholder="Select Client"
+                    className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs uppercase rounded-md w-full"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Concern person</label>
-                  <Input value={attn} onChange={e => setAttn(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-xl" />
+                  <Input value={attn} onChange={e => setAttn(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-md" />
                 </div>
                 <div className="md:col-span-2 space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Project Title</label>
-                  <Input value={project} onChange={e => setProject(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-xl" />
+                  <Input value={project} onChange={e => setProject(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-md" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Email Address</label>
-                  <Input type="email" value={email} onChange={e => setEmail(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-xl" />
+                  <Input type="email" value={email} onChange={e => setEmail(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-md" />
                 </div>
                 <div className="md:col-span-2 space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Address</label>
@@ -718,7 +850,17 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                     value={address} 
                     onChange={e => setAddress(e.target.value)} 
                     rows={3}
-                    className="w-full rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-bold text-slate-700 ring-offset-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full rounded-md border border-blue-100 bg-white px-3 py-2 text-xs font-bold text-slate-700 ring-offset-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </div>
+                <div className="md:col-span-2 space-y-1.5">
+                  <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Description</label>
+                  <textarea 
+                    value={description} 
+                    onChange={e => setDescription(e.target.value)} 
+                    rows={3}
+                    placeholder="Brief description about the project or note about the quotation"
+                    className="w-full rounded-md border border-blue-100 bg-white px-3 py-2 text-xs font-bold text-slate-700 ring-offset-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -726,29 +868,25 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
 
             <div className="space-y-6">
               <div className="flex items-center gap-2 mb-4">
-                <div className="h-5 w-1 bg-slate-400 rounded-full"></div>
+                <div className="h-5 w-1 bg-slate-400 rounded-sm"></div>
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800">Order Reference</h3>
               </div>
               <div className="space-y-4">
-                    <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                <div className="grid grid-cols-2 items-center py-2 border-b border-slate-50">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Order No.</span>
-                  <Input value={orderNo} onChange={e => setOrderNo(e.target.value)} className="h-8 w-32 border-none bg-blue-50 text-right font-mono font-black text-xs text-blue-600" />
+                  <Input size="sm" value={orderNo} onChange={e => setOrderNo(e.target.value)} className="w-full text-right font-mono font-black text-xs text-blue-600 rounded-md border-slate-100" />
                 </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                <div className="grid grid-cols-2 items-center py-2 border-b border-slate-50">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Date</span>
-                  <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-8 w-40 border-none bg-slate-50 text-right font-bold text-[10px] text-slate-800" />
+                  <Input size="sm" type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full text-right font-bold text-[10px] text-slate-800 rounded-md border-slate-100 [color-scheme:light]" />
                 </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                <div className="grid grid-cols-2 items-center py-2 border-b border-slate-50">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer ID</span>
-                  <Input value={customerId} onChange={e => setCustomerId(e.target.value)} className="h-8 w-32 border-none bg-slate-50 text-right font-bold text-xs text-slate-800" />
+                  <Input size="sm" value={customerId} onChange={e => setCustomerId(e.target.value)} className="w-full text-right font-bold text-xs text-slate-800 rounded-md border-slate-100" />
                 </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-50">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Expiry Date</span>
-                  <Input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className="h-8 w-40 border-none bg-slate-50 text-right font-bold text-[10px] text-slate-800" />
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Revision</span>
-                  <Input value={revision} onChange={e => setRevision(e.target.value)} className="h-8 w-32 border-none bg-slate-50 text-right font-bold text-xs text-slate-800" />
+                <div className="grid grid-cols-2 items-center py-2 h-10">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Quotation No.</span>
+                  <Input size="sm" value={quotationNoFromRef} onChange={e => setQuotationNoFromRef(e.target.value)} className="w-full text-right font-bold text-xs text-slate-800 rounded-md border-slate-100" />
                 </div>
               </div>
             </div>
@@ -757,10 +895,10 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
           <div className="space-y-12">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="h-5 w-1.5 bg-blue-600 rounded-full"></div>
+                <div className="h-5 w-1.5 bg-blue-600 rounded-sm"></div>
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-900">Order Breakdown</h3>
               </div>
-              <Button size="sm" onClick={addSection} className="h-8 gap-2 bg-blue-700 hover:bg-blue-800 text-[9px] font-black uppercase tracking-widest px-4 shadow-sm">
+              <Button size="sm" onClick={addSection} className="h-8 gap-2 bg-blue-700 hover:bg-blue-800 text-[9px] font-black uppercase tracking-widest px-4 shadow-sm rounded-md">
                 <Plus className="h-3.5 w-3.5 text-white" /> Add New Group
               </Button>
             </div>
@@ -772,38 +910,29 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                     <Input 
                       value={section.sn} 
                       onChange={e => updateSection(section.id, 'sn', e.target.value)} 
-                      className="h-8 w-16 border-none bg-slate-50 font-mono text-[10px] font-black text-slate-400" 
+                      className="h-8 w-16 border-slate-100 bg-transparent font-mono text-[10px] font-black text-slate-400 rounded-md hover:bg-slate-50 transition-all px-2" 
                     />
                     <div className="flex-1">
-                      <Select 
-                        value={section.title} 
+                      <Combobox
+                        options={[
+                          ...categories.map(cat => ({ label: cat.name, value: cat.name })),
+                          ...(section.title && !categories.some(c => c.name === section.title) ? [{ label: `Custom: ${section.title}`, value: section.title }] : [])
+                        ]}
+                        value={section.title}
                         onValueChange={val => updateSection(section.id, 'title', val)}
-                      >
-                        <SelectTrigger className="h-9 border-none bg-transparent font-black text-sm text-slate-800 uppercase tracking-tight w-full hover:bg-slate-50 transition-colors">
-                          <SelectValue placeholder="Select Category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.map(cat => (
-                            <SelectItem key={cat.id} value={cat.name} className="text-[10px] font-bold py-2 uppercase">
-                              {cat.name}
-                            </SelectItem>
-                          ))}
-                          {section.title && !categories.some(c => c.name === section.title) && (
-                             <SelectItem value={section.title} className="text-[10px] font-bold py-2 uppercase text-slate-400">
-                               Custom: {section.title}
-                             </SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select Category"
+                        className="h-9 border-slate-100 bg-transparent font-black text-sm text-slate-800 uppercase tracking-tight w-[680px] hover:bg-slate-50 transition-all rounded-md px-3"
+                      />
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-8 gap-2 border-slate-200 text-[8px] font-black uppercase tracking-widest px-3 bg-white hover:bg-slate-50">
+                      <DropdownMenuTrigger render={
+                        <Button variant="outline" size="sm" className="h-8 gap-2 border-slate-200 text-[8px] font-black uppercase tracking-widest px-3 bg-white hover:bg-slate-50 rounded-md">
                           <Plus className="h-3 w-3 text-slate-400" /> Catalog
                         </Button>
-                      </DropdownMenuTrigger>
+                      } />
+
                       <DropdownMenuContent align="end" className="w-56">
                         <DropdownMenuGroup>
                           <DropdownMenuLabel className="text-[9px] font-black uppercase tracking-widest text-slate-400">Add from Catalog</DropdownMenuLabel>
@@ -830,7 +959,7 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                   </div>
                 </div>
 
-                <div className="border border-slate-100 rounded-xl overflow-hidden shadow-sm bg-white">
+                <div className="border border-slate-100 rounded-md overflow-hidden shadow-sm bg-white">
                   <Table>
                     <TableHeader className="bg-slate-50">
                       <TableRow className="h-10 border-none hover:bg-transparent">
@@ -849,7 +978,7 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                       {section.items.map((item) => (
                         <TableRow key={item.id} className="hover:bg-slate-50/50 transition-colors border-b border-slate-50">
                           <TableCell className="px-4">
-                            <Input value={item.sn} onChange={e => updateItem(section.id, item.id, 'sn', e.target.value)} className="h-7 border-none bg-transparent font-mono text-[9px] font-extrabold text-slate-400" />
+                            <Input size="sm" value={item.sn} onChange={e => updateItem(section.id, item.id, 'sn', e.target.value)} className="font-mono text-[9px] font-black text-slate-400 rounded-md h-[38px] border-slate-100 bg-transparent hover:bg-slate-50 transition-all px-2 text-center" />
                           </TableCell>
                           <TableCell className="p-0">
                             <div className="flex justify-center items-center">
@@ -869,19 +998,30 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                             </div>
                           </TableCell>
                           <TableCell>
-                             <Input value={item.subCategory} onChange={e => updateItem(section.id, item.id, 'subCategory', e.target.value)} placeholder="Sub Category" className="h-7 border-none bg-transparent font-black text-[10px] text-blue-600 uppercase" />
+                            <Combobox
+                              options={Array.from(new Set(templateItems.filter(t => t.name).map(t => t.name))).map(name => ({ label: name, value: name }))}
+                              value={item.subCategory || ''}
+                              onValueChange={val => updateItem(section.id, item.id, 'subCategory', val)}
+                              placeholder="Sub Category"
+                              className="h-[38px] border-slate-100 bg-transparent font-black text-[10px] text-blue-600 uppercase rounded-md hover:bg-slate-50 transition-all px-2"
+                            />
                           </TableCell>
                           <TableCell>
-                             <Input value={item.description} onChange={e => updateItem(section.id, item.id, 'description', e.target.value)} className="h-7 border-none bg-transparent font-bold text-xs text-slate-700" />
+                             <Textarea
+                               value={item.description}
+                               onChange={e => updateItem(section.id, item.id, 'description', e.target.value)}
+                               className="min-h-[38px] field-sizing-content font-bold text-xs text-slate-700 rounded-md border-slate-100 bg-transparent hover:bg-slate-50 transition-all resize-none overflow-hidden py-2"
+                               rows={1}
+                             />
                           </TableCell>
                           <TableCell>
-                             <Input value={item.unit} onChange={e => updateItem(section.id, item.id, 'unit', e.target.value)} className="h-7 border-none bg-transparent font-bold text-[10px] text-slate-500 uppercase" />
+                             <Input size="sm" value={item.unit} onChange={e => updateItem(section.id, item.id, 'unit', e.target.value)} className="font-bold text-[10px] text-slate-500 uppercase rounded-md h-[38px] border-slate-100 bg-transparent hover:bg-slate-50 transition-all px-2" />
                           </TableCell>
                           <TableCell>
-                             <Input type="number" value={item.qty} onChange={e => updateItem(section.id, item.id, 'qty', parseFloat(e.target.value))} className="h-7 text-center bg-transparent border-none font-bold text-xs" />
+                             <Input size="sm" type="number" value={item.qty} onChange={e => updateItem(section.id, item.id, 'qty', e.target.value)} className="text-center font-bold text-xs rounded-md h-[38px] border-slate-100 bg-transparent hover:bg-slate-50 transition-all" min="0" />
                           </TableCell>
                           <TableCell>
-                             <Input type="number" value={item.unitPrice} onChange={e => updateItem(section.id, item.id, 'unitPrice', parseFloat(e.target.value))} className="h-7 text-right bg-transparent border-none font-mono font-bold text-slate-600 text-[11px]" />
+                             <Input size="sm" type="number" value={item.unitPrice} onChange={e => updateItem(section.id, item.id, 'unitPrice', e.target.value)} className="text-right font-mono font-bold text-slate-600 text-[11px] rounded-md h-[38px] border-slate-100 bg-transparent hover:bg-slate-50 transition-all px-2" min="0" />
                           </TableCell>
                           <TableCell className="text-right font-black text-slate-900 font-mono text-[11px]">
                             {item.amount.toLocaleString()}.00
@@ -912,26 +1052,9 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 pt-8 border-t border-slate-100">
-            <div className="space-y-6">
-              <div className="p-8 bg-slate-50/50 rounded-2xl border border-slate-100 space-y-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Order Value in words</p>
-                <p className="text-[11px] font-bold text-slate-600 leading-relaxed uppercase italic">{amountInWords}</p>
-                <div className="pt-6 flex items-center gap-3">
-                  <div className="h-8 w-8 bg-white rounded-lg flex items-center justify-center border border-slate-200 shadow-sm">
-                    <Shield className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Authorized & Verified Commercial Document</p>
-                </div>
-              </div>
-              <div className="flex gap-4 p-5 border border-blue-100 bg-blue-50/50 rounded-2xl shadow-inner-white">
-                 <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-                 <p className="text-[10px] text-blue-900/60 font-medium leading-relaxed">
-                   Summary nodes identified with <span className="font-bold">.0</span> suffixes (e.g. 1.0) occupy the primary project summary projection for institutional A4 exports.
-                 </p>
-              </div>
-            </div>
+            <div></div>
 
-            <div className="bg-white border border-slate-200 rounded-3xl p-10 space-y-8 shadow-sm">
+            <div className="bg-white border border-slate-200 rounded-md p-10 space-y-8 shadow-sm">
               <div className="space-y-5">
                 <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-widest text-slate-400">
                   <span>Gross Sub Total</span>
@@ -945,8 +1068,9 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                     <Input 
                       type="number" 
                       value={discount} 
-                      onChange={e => setDiscount(Number(e.target.value))} 
-                      className="h-9 w-32 border-slate-200 bg-slate-50 text-right font-mono font-black text-xs text-[#f87171] focus:ring-1 focus:ring-red-400" 
+                      onChange={e => setDiscount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))} 
+                      className="h-9 w-32 border-slate-200 bg-slate-50 text-right font-mono font-black text-xs text-[#f87171] focus:ring-1 focus:ring-red-400 rounded-md" 
+                      min="0"
                     />
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-400">-SAR</span>
                   </div>
@@ -961,19 +1085,10 @@ export default function SalesOrderEditor({ id }: { id?: string }) {
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-2">Final Order Value</p>
                   <h2 className="text-4xl font-black font-mono tracking-tighter text-slate-900">SAR {grandTotal.toLocaleString()}.00</h2>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <div 
-                    onClick={handleSaveOrder}
-                    className="h-12 w-12 bg-blue-50 rounded-2xl flex items-center justify-center border border-blue-100 shadow-sm text-blue-400 group hover:text-blue-600 hover:bg-blue-100 transition-all cursor-pointer"
-                  >
-                    <Save className="h-6 w-6" />
-                  </div>
-                </div>
               </div>
             </div>
           </div>
         </CardContent>
-      </Card>
-    </div>
+    </Card>
   );
 }

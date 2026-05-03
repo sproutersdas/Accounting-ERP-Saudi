@@ -18,7 +18,14 @@ import {
   MoreHorizontal,
   FileText,
   Trash2,
-  Settings2
+  Settings2,
+  ShoppingCart,
+  Hash,
+  Weight,
+  Box,
+  AlertCircle,
+  BarChart2,
+  DollarSign
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -78,7 +85,7 @@ const InventoryItemDetails = ({ id, onBack, onEdit }: { id: number, onBack: () =
           ← Back to Warehouse
         </Button>
         <div className="flex gap-2">
-          <Button onClick={onEdit} className="h-9 text-[10px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-600">Edit Specs</Button>
+          <Button onClick={onEdit} className="h-9 text-[10px] font-black uppercase tracking-widest bg-primary hover:bg-primary/90 text-white rounded-xl shadow-lg shadow-primary/20">Edit Specs</Button>
         </div>
       </div>
 
@@ -98,6 +105,17 @@ const InventoryItemDetails = ({ id, onBack, onEdit }: { id: number, onBack: () =
                   <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider font-mono">
                     <Layers className="h-3.5 w-3.5 text-slate-300" /> SKU: {item.sku}
                   </div>
+                </div>
+                <div className="flex items-center gap-2 mt-3">
+                  {item.location_type === 'project' ? (
+                    <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 font-black text-[9px] uppercase tracking-widest px-3 py-1 flex gap-2">
+                       <Building2 className="h-3 w-3" /> Allocated: {item.project_name || 'Assigned Project'}
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-blue-50 text-blue-700 border-blue-100 font-black text-[9px] uppercase tracking-widest px-3 py-1 flex gap-2">
+                       <ShoppingCart className="h-3 w-3" /> Global (Company Stock)
+                    </Badge>
+                  )}
                 </div>
               </div>
             </div>
@@ -147,16 +165,25 @@ const InventoryItemDetails = ({ id, onBack, onEdit }: { id: number, onBack: () =
 
 // --- PRODUCT FORM (Registration & Update) ---
 const ProductForm = ({ id, onCancel, onSuccess }: { id?: number, onCancel: () => void, onSuccess: () => void }) => {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<any>({
     sku: '',
     name: '',
     category: '',
     unit: '',
-    qty_on_hand: 0,
-    min_qty: 0,
-    cost_price: 0,
-    sale_price: 0
+    qty_on_hand: '',
+    min_qty: '',
+    cost_price: '',
+    sale_price: '',
+    location_type: 'company',
+    project_id: ''
   });
+  const [projects, setProjects] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch('/api/projects')
+      .then(r => r.json())
+      .then(data => setProjects(Array.isArray(data) ? data : []));
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -171,10 +198,12 @@ const ProductForm = ({ id, onCancel, onSuccess }: { id?: number, onCancel: () =>
             name: data.name || '',
             category: data.category || '',
             unit: data.unit || '',
-            qty_on_hand: data.qty_on_hand || 0,
-            min_qty: data.min_qty || 0,
-            cost_price: data.cost_price || 0,
-            sale_price: data.sale_price || 0
+            qty_on_hand: data.qty_on_hand === 0 ? '' : data.qty_on_hand,
+            min_qty: data.min_qty === 0 ? '' : data.min_qty,
+            cost_price: data.cost_price === 0 ? '' : data.cost_price,
+            sale_price: data.sale_price === 0 ? '' : data.sale_price,
+            location_type: data.location_type || 'company',
+            project_id: data.project_id?.toString() || ''
           });
           setLoading(false);
         })
@@ -210,61 +239,112 @@ const ProductForm = ({ id, onCancel, onSuccess }: { id?: number, onCancel: () =>
   if (loading) return <div className="h-64 flex items-center justify-center text-slate-400 font-mono text-xs uppercase tracking-widest animate-pulse">Initializing Specialized Editor...</div>;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-[1030px] mx-auto space-y-6">
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
         <div>
           <h2 className="text-xl font-black tracking-tight text-slate-800 uppercase">{id ? 'Update Specifications' : 'Provision Product'}</h2>
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1 italic">Master Asset Data Registry</p>
         </div>
-        <Button variant="ghost" onClick={onCancel} className="text-[10px] font-black uppercase tracking-widest text-blue-600">← Discard Changes</Button>
+        <Button variant="ghost" onClick={onCancel} className="text-[10px] font-black uppercase tracking-widest text-blue-600 hover:bg-blue-50">← Discard Changes</Button>
       </div>
 
-      <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden p-10">
-        <form onSubmit={handleSubmit} className="space-y-8">
-           <div className="grid grid-cols-2 gap-8">
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Internal Reference (SKU)</Label>
-                <Input required value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} className="h-11 border-slate-200 focus:ring-1 focus:ring-blue-600 font-bold font-mono" placeholder="WHS-PRD-001" />
+      <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden p-8 min-h-[350px]">
+        <form onSubmit={handleSubmit} className="space-y-6">
+           <div className="grid grid-cols-3 gap-6">
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Internal Reference (SKU)</Label>
+                  <Input icon={Hash} required value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} className="font-mono h-10" placeholder="WHS-PRD-001" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Classification Category</Label>
+                  <Input icon={Layers} required value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="h-10" placeholder="Fit-out / Civil / General" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Unit of Measurement</Label>
+                  <Input icon={Weight} required value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} className="h-10" placeholder="Kg / Sqm / Unit" />
+                </div>
+
+                <div className="col-span-2 space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Technical Name / Description</Label>
+                  <Input icon={Package} required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="font-black uppercase h-10" placeholder="ACRYLIC SHEET - OPAL 3MM" />
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="space-y-1.5">
+                      <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">On-Hand Qty</Label>
+                      <Input icon={Box} type="number" required value={formData.qty_on_hand} onChange={e => setFormData({...formData, qty_on_hand: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value))})} className="font-black text-center h-10" min="0" />
+                   </div>
+                   <div className="space-y-1.5">
+                      <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Alert Floor</Label>
+                      <Input icon={AlertCircle} type="number" required value={formData.min_qty} onChange={e => setFormData({...formData, min_qty: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value))})} className="font-bold text-center text-red-500 h-10" min="0" />
+                   </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Acquisition Cost (SAR)</Label>
+                  <Input icon={DollarSign} type="number" step="0.01" required value={formData.cost_price} onChange={e => setFormData({...formData, cost_price: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value))})} className="font-black font-mono text-blue-600 h-10" min="0" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Sale Valuation (SAR)</Label>
+                  <Input icon={BarChart2} type="number" step="0.01" required value={formData.sale_price} onChange={e => setFormData({...formData, sale_price: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value))})} className="font-black font-mono text-blue-600 h-10" min="0" />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Ownership Type</Label>
+                  <div className="flex gap-2">
+                    <Button 
+                      type="button" 
+                      variant={formData.location_type === 'company' ? 'default' : 'outline'}
+                      onClick={() => setFormData({...formData, location_type: 'company', project_id: ''})}
+                      className="flex-1 h-10 text-[9px] font-black uppercase tracking-widest rounded-lg"
+                    >
+                      Global
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant={formData.location_type === 'project' ? 'default' : 'outline'}
+                      onClick={() => setFormData({...formData, location_type: 'project'})}
+                      className="flex-1 h-10 text-[9px] font-black uppercase tracking-widest rounded-lg"
+                    >
+                      Project
+                    </Button>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Classification Category</Label>
-                <Input required value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="h-11 border-slate-200 focus:ring-1 focus:ring-blue-600 font-bold" placeholder="Fit-out / Civil / General" />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Technical Name / Description</Label>
-                <Input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="h-11 border-slate-200 focus:ring-1 focus:ring-blue-600 font-black uppercase" placeholder="ACRYLIC SHEET - OPAL 3MM" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Unit of Measurement</Label>
-                <Input required value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} className="h-11 border-slate-200 focus:ring-1 focus:ring-blue-600 font-bold" placeholder="Kg / Sqm / Unit" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                 <div className="space-y-1.5">
-                    <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">On-Hand Qty</Label>
-                    <Input type="number" required value={formData.qty_on_hand} onChange={e => setFormData({...formData, qty_on_hand: Number(e.target.value)})} className="h-11 border-slate-200 font-black text-center" />
-                 </div>
-                 <div className="space-y-1.5">
-                    <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Alert Floor</Label>
-                    <Input type="number" required value={formData.min_qty} onChange={e => setFormData({...formData, min_qty: Number(e.target.value)})} className="h-11 border-slate-200 font-bold text-center text-red-500" />
-                 </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Acquisition Cost (SAR)</Label>
-                <Input type="number" step="0.01" required value={formData.cost_price} onChange={e => setFormData({...formData, cost_price: Number(e.target.value)})} className="h-11 border-slate-200 font-black font-mono text-blue-600" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Sale Valuation (SAR)</Label>
-                <Input type="number" step="0.01" required value={formData.sale_price} onChange={e => setFormData({...formData, sale_price: Number(e.target.value)})} className="h-11 border-slate-200 font-black font-mono text-blue-600" />
-              </div>
-           </div>
-           <div className="pt-8 flex justify-end gap-3 border-t border-slate-100">
-              <Button type="submit" disabled={submitting} className="h-12 px-12 text-[11px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-xl shadow-blue-500/20">
-                {submitting ? 'Processing Registry...' : 'Commit Specifications'}
-              </Button>
-           </div>
-        </form>
+
+              {formData.location_type === 'project' && (
+                <div className="pt-4 border-t border-slate-50 animate-in fade-in slide-in-from-top-2">
+                  <div className="flex items-center gap-6">
+                    <div className="flex-1 space-y-1.5">
+                      <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Select Project Allocation</Label>
+                      <select 
+                        value={formData.project_id}
+                        onChange={e => setFormData({...formData, project_id: e.target.value})}
+                        className="w-full h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold focus:outline-none focus:ring-1 focus:ring-blue-600 transition-all"
+                        required
+                      >
+                        <option value="" disabled>Choose Target Project</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="w-64 pt-6 text-[9px] font-medium text-slate-400 uppercase tracking-widest italic">
+                      Locked to specific project site inventory
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            <div className="pt-6 flex justify-end gap-3 border-t border-slate-100">
+               <Button type="submit" disabled={submitting} className="h-11 px-12 text-[11px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-xl shadow-blue-500/20 rounded-xl transition-all active:scale-95">
+                 {submitting ? 'Processing...' : 'Commit Specifications'}
+               </Button>
+            </div>
+         </form>
       </Card>
     </div>
+
   );
 };
 
@@ -277,8 +357,8 @@ const StockListView = () => {
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any>(null);
 
-  const [adjustment, setAdjustment] = useState({
-    qty_on_hand: 0,
+  const [adjustment, setAdjustment] = useState<any>({
+    qty_on_hand: '',
     reason: 'Stock Take'
   });
 
@@ -354,7 +434,7 @@ const StockListView = () => {
 
   const getStatusBadge = (qty: number, min: number) => {
     if (qty <= 0) return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-none font-bold text-[10px]">OUT OF STOCK</Badge>;
-    if (qty < min) return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none font-bold text-[10px]">LOW STOCK</Badge>;
+    if (qty < min) return <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none font-bold text-[10px]">LOW STOCK</Badge>;
     return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none font-bold text-[10px]">IN STOCK</Badge>;
   };
 
@@ -398,8 +478,9 @@ const StockListView = () => {
                    type="number" 
                    required 
                    value={adjustment.qty_on_hand} 
-                   onChange={e => setAdjustment({...adjustment, qty_on_hand: Number(e.target.value)})} 
+                   onChange={e => setAdjustment({...adjustment, qty_on_hand: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value))})} 
                    className="h-10 text-sm font-bold bg-slate-50"
+                   min="0"
                  />
                </div>
                <Button type="submit" className="w-full bg-slate-900 h-10 text-[10px] font-black uppercase tracking-widest">Update Level</Button>
@@ -411,7 +492,7 @@ const StockListView = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           { label: 'Total SKUs', value: stock.length.toString(), icon: Archive, color: 'blue' },
-          { label: 'Low Stock Items', value: stock.filter(i => i.qty_on_hand < i.min_qty).length.toString(), icon: AlertTriangle, color: 'amber' },
+          { label: 'Low Stock Items', value: stock.filter(i => i.qty_on_hand < i.min_qty).length.toString(), icon: AlertTriangle, color: 'primary' },
           { label: 'Total Valuation', value: `SAR ${(stock.reduce((acc, i) => acc + (i.qty_on_hand * i.cost_price), 0) / 1000).toFixed(1)}k`, icon: Layers, color: 'blue' },
         ].map(stat => (
           <Card key={stat.label} className="border-none shadow-sm bg-white">
@@ -431,13 +512,12 @@ const StockListView = () => {
       <Card className="border-none shadow-sm bg-white overflow-hidden">
         <CardHeader className="border-b border-slate-100 px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <div className="w-72">
               <Input 
+                icon={Search}
                 placeholder="Search products..." 
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 text-xs bg-slate-50 border-slate-200" 
               />
             </div>
             <div className="flex gap-2">
@@ -450,6 +530,7 @@ const StockListView = () => {
             <TableHeader className="bg-slate-50">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="font-bold text-slate-500 text-[11px] h-10 px-6 uppercase tracking-wider">SKU / Item</TableHead>
+                <TableHead className="font-bold text-slate-500 text-[11px] h-10 px-6 uppercase tracking-wider">Ownership</TableHead>
                 <TableHead className="font-bold text-slate-500 text-[11px] h-10 px-6 uppercase tracking-wider">Category</TableHead>
                 <TableHead className="font-bold text-slate-500 text-[11px] h-10 px-6 uppercase tracking-wider text-right">Qty On Hand</TableHead>
                 <TableHead className="font-bold text-slate-500 text-[11px] h-10 px-6 uppercase tracking-wider text-center">Status</TableHead>
@@ -464,6 +545,16 @@ const StockListView = () => {
                       <span className="font-bold text-slate-800 text-xs">{item.name}</span>
                       <span className="text-[10px] text-slate-400 font-bold">{item.sku}</span>
                     </div>
+                  </TableCell>
+                  <TableCell className="px-6 py-4">
+                    {item.location_type === 'project' ? (
+                      <div className="flex flex-col gap-1">
+                        <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-none font-bold text-[8px] uppercase tracking-tighter w-fit">Project Asset</Badge>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-tight truncate max-w-[120px]">{item.project_name || 'Project-X'}</span>
+                      </div>
+                    ) : (
+                      <Badge className="bg-blue-50 text-blue-700 hover:bg-blue-100 border-none font-bold text-[8px] uppercase tracking-tighter">Global (Company)</Badge>
+                    )}
                   </TableCell>
                   <TableCell className="px-6 py-4">
                     <Badge variant="secondary" className="bg-slate-100 text-slate-600 font-bold text-[9px] border-none">{item.category}</Badge>
@@ -496,7 +587,7 @@ const StockListView = () => {
                              <FileText className="mr-2 h-4 w-4 text-blue-600" /> View Specs
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => { setSelectedId(item.id); setView('edit'); }} className="text-[10px] font-black py-2.5 uppercase tracking-wide text-slate-600">
-                             <Settings2 className="mr-2 h-4 w-4 text-amber-500" /> Edit Specs
+                             <Settings2 className="mr-2 h-4 w-4 text-primary" /> Edit Specs
                           </DropdownMenuItem>
                           <DropdownMenuItem 
                             onClick={() => {

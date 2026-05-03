@@ -17,13 +17,7 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 
 // --- PRINT HEADER ---
@@ -215,16 +209,13 @@ export function CashBookView({ company }: { company: any }) {
         <div className="flex flex-wrap gap-4 items-end pt-2 border-t border-slate-50">
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase text-slate-400 tracking-[0.1em]">Account Selection</label>
-            <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-              <SelectTrigger className="h-9 w-64 text-[11px] font-bold border-slate-200 bg-slate-50">
-                <SelectValue placeholder="Select Account" />
-              </SelectTrigger>
-              <SelectContent>
-                {accounts.map(acc => (
-                  <SelectItem key={acc.id} value={acc.id.toString()}>{acc.code} - {acc.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={accounts.map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
+              value={selectedAccount}
+              onValueChange={setSelectedAccount}
+              placeholder="Select Account"
+              className="h-9 w-64 text-[11px] font-bold border-slate-200 bg-slate-50"
+            />
           </div>
           <div className="space-y-1.5">
             <label className="text-[9px] font-black uppercase text-slate-400 tracking-[0.1em]">Date Range</label>
@@ -263,7 +254,7 @@ export function CashBookView({ company }: { company: any }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow className="bg-amber-50/30 hover:bg-amber-50/50">
+                <TableRow className="bg-primary/5 hover:bg-primary/10">
                   <TableCell className="px-8 py-3 text-[10px] font-black font-mono text-slate-400 uppercase">{from}</TableCell>
                   <TableCell className="py-3 font-black text-xs text-slate-700 uppercase tracking-widest">Opening Balance B/F</TableCell>
                   <TableCell className="text-right"></TableCell>
@@ -719,11 +710,11 @@ export default function ReportsModule({ subModule, initialParams }: { subModule:
        {(activeTab === 'Balance Sheet' || activeTab === 'Balance Sheet (Horizontal)') && (
           <div className="animate-in fade-in duration-500">
              {/* This part leverages the HorizontalBalanceSheet already in AccountingModule.tsx but potentially enhanced or re-rendered here */}
-             <div className="p-8 bg-amber-50 border border-amber-100 rounded-xl mb-6 flex gap-4">
-                <Scale className="h-6 w-6 text-amber-600 shrink-0" />
+             <div className="p-8 bg-primary/5 border border-primary/10 rounded-xl mb-6 flex gap-4">
+                <Scale className="h-6 w-6 text-primary shrink-0" />
                 <div>
-                   <p className="text-xs text-amber-800 font-black uppercase tracking-widest mb-1">Financial Position Statement</p>
-                   <p className="text-xs text-amber-800 font-medium opacity-80">
+                   <p className="text-xs text-sidebar-foreground font-black uppercase tracking-widest mb-1">Financial Position Statement</p>
+                   <p className="text-xs text-sidebar-foreground font-medium opacity-80">
                       Scope: Single Entity Consolidation
                    </p>
                 </div>

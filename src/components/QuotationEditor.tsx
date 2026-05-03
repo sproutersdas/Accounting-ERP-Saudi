@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { Plus, Trash2, Image as ImageIcon, Printer, Save, FileText, Briefcase, PackageCheck, ShoppingCart, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { Badge } from '@/components/ui/badge';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,8 +27,8 @@ interface QuotationItem {
   subCategory?: string;
   description: string;
   unit: string;
-  qty: number;
-  unitPrice: number;
+  qty: number | '';
+  unitPrice: number | '';
   amount: number;
   image?: string;
 }
@@ -44,7 +45,7 @@ interface ProjectTemplateItem {
     name: string;
     description: string;
     unit: string;
-    default_unit_price: number;
+    default_unit_price: number | '';
     category_id: number;
 }
 
@@ -73,6 +74,7 @@ interface Customer {
 export default function QuotationEditor({ id }: { id?: string }) {
   const [sections, setSections] = useState<QuotationSection[]>([]);
   const [templateItems, setTemplateItems] = useState<ProjectTemplateItem[]>([]);
+  const [units, setUnits] = useState<{id: number, name: string}[]>([]);
   const [categories, setCategories] = useState<{id: number, name: string}[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [company, setCompany] = useState<CompanyDetails | null>(null);
@@ -83,11 +85,12 @@ export default function QuotationEditor({ id }: { id?: string }) {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [templateRes, customerRes, companyRes, categoryRes] = await Promise.all([
+        const [templateRes, customerRes, companyRes, categoryRes, unitRes] = await Promise.all([
           fetch('/api/project-template-items'),
           fetch('/api/customers'),
           fetch('/api/company-details'),
-          fetch('/api/project-categories')
+          fetch('/api/project-categories'),
+          fetch('/api/units')
         ]);
 
         const safeJson = async (res: Response) => {
@@ -103,10 +106,12 @@ export default function QuotationEditor({ id }: { id?: string }) {
         const customerList = await safeJson(customerRes);
         const companies = await safeJson(companyRes);
         const cats = await safeJson(categoryRes);
+        const unitList = await safeJson(unitRes);
 
         if (Array.isArray(templates)) setTemplateItems(templates);
         if (Array.isArray(customerList)) setCustomers(customerList);
         if (Array.isArray(cats)) setCategories(cats);
+        if (Array.isArray(unitList)) setUnits(unitList);
         if (Array.isArray(companies) && companies.length > 0) {
           setCompany(companies[0]);
         } else if (companies && !Array.isArray(companies) && companies.name) {
@@ -123,9 +128,29 @@ export default function QuotationEditor({ id }: { id?: string }) {
             setCustomerId(data.customer_id?.toString() || '');
             setProject(data.project_name);
             setRevision(data.revision || '0');
-            setDiscount(data.discount || 0);
+            setDiscount(data.discount || '');
             setValidUntil(data.valid_until || '');
             setParentId(data.parent_id);
+            setDescription(data.description || '');
+            setTermsAndConditions(data.terms_and_conditions || '');
+            try {
+              const parsedNotes = JSON.parse(data.notes_json || '[]');
+              setNotes(Array.isArray(parsedNotes) ? parsedNotes : []);
+            } catch (e) {
+              setNotes([]);
+            }
+            
+            // Populate customer info based on loaded list
+            const matchedCustomer = customerList.find((c: any) => c.name === data.customer_name || c.id === data.customer_id);
+            if (matchedCustomer) {
+              setAttn(matchedCustomer.contact_person || '');
+              setAddress(matchedCustomer.address || '');
+              setEmail(matchedCustomer.email || '');
+            } else {
+              setAttn('');
+              setAddress('');
+              setEmail('');
+            }
             
             // Reconstruct sections from items
             const newSections: QuotationSection[] = [];
@@ -144,7 +169,7 @@ export default function QuotationEditor({ id }: { id?: string }) {
                 } else if (currentSection) {
                   currentSection.items.push({
                     id: 'item-' + Math.random().toString(36).substr(2, 9),
-                    sn: item.sn,
+                    sn: `${currentSection.sn.split('.')[0]}.${currentSection.items.length + 1}`,
                     description: item.description,
                     unit: item.unit,
                     qty: item.qty,
@@ -186,6 +211,9 @@ export default function QuotationEditor({ id }: { id?: string }) {
   const [to, setTo] = useState('ATS TRAVELS');
   const [attn, setAttn] = useState('MR.SALEEM WAWDA, GENERAL MANAGER');
   const [address, setAddress] = useState('office 39,First Floor-Localizer mall, Ablaziz Road, Thalia Street Olaya, Riyadh');
+  const [description, setDescription] = useState('');
+  const [termsAndConditions, setTermsAndConditions] = useState('');
+  const [notes, setNotes] = useState<string[]>([]);
   const [project, setProject] = useState('ATS Office Interior Fit out');
   const [email, setEmail] = useState('Salim@travelsats.com');
   
@@ -194,9 +222,10 @@ export default function QuotationEditor({ id }: { id?: string }) {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [customerId, setCustomerId] = useState('');
   const [validUntil, setValidUntil] = useState(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-  const [revision, setRevision] = useState('0');
-  const [discount, setDiscount] = useState(0);
+  const [revision, setRevision] = useState('R1');
+  const [discount, setDiscount] = useState<number | ''>('');
   const [isSaved, setIsSaved] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
 
   const handleCustomerChange = (customerName: string) => {
     setTo(customerName);
@@ -225,14 +254,27 @@ export default function QuotationEditor({ id }: { id?: string }) {
   };
 
   const updateSection = (id: string, field: keyof QuotationSection, value: any) => {
-    setSections(sections.map(s => s.id === id ? { ...s, [field]: value } : s));
+    setSections(sections.map(s => {
+      if (s.id === id) {
+        const updated = { ...s, [field]: value };
+        if (field === 'sn') {
+          const baseSn = value.split('.')[0];
+          updated.items = updated.items.map((it, idx) => ({
+             ...it,
+             sn: `${baseSn}.${idx + 1}`
+          }));
+        }
+        return updated;
+      }
+      return s;
+    }));
   };
 
   const addItemToSection = (sectionId: string) => {
     setSections(sections.map(sec => {
       if (sec.id === sectionId) {
         const nextItemNum = sec.items.length + 1;
-        const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum.toString().padStart(2, '0')}`;
+        const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum}`;
         return {
           ...sec,
           items: [...sec.items, {
@@ -241,8 +283,8 @@ export default function QuotationEditor({ id }: { id?: string }) {
             subCategory: '',
             description: '',
             unit: 'Item',
-            qty: 1,
-            unitPrice: 0,
+            qty: '',
+            unitPrice: '',
             amount: 0
           }]
         };
@@ -255,7 +297,7 @@ export default function QuotationEditor({ id }: { id?: string }) {
     setSections(sections.map(sec => {
         if (sec.id === sectionId) {
             const nextItemNum = sec.items.length + 1;
-            const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum.toString().padStart(2, '0')}`;
+            const itemSn = `${sec.sn.split('.')[0]}.${nextItemNum}`;
             return {
                 ...sec,
                 items: [...sec.items, {
@@ -264,9 +306,9 @@ export default function QuotationEditor({ id }: { id?: string }) {
                     subCategory: template.name,
                     description: template.description,
                     unit: template.unit,
-                    qty: 1,
-                    unitPrice: template.default_unit_price,
-                    amount: template.default_unit_price
+                    qty: '',
+                    unitPrice: '',
+                    amount: 0
                 }]
             };
         }
@@ -278,7 +320,11 @@ export default function QuotationEditor({ id }: { id?: string }) {
   const removeItem = (sectionId: string, itemId: string) => {
     setSections(sections.map(sec => {
         if (sec.id === sectionId) {
-            return { ...sec, items: sec.items.filter(it => it.id !== itemId) };
+            const newItems = sec.items.filter(it => it.id !== itemId).map((it, idx) => ({
+                ...it,
+                sn: `${sec.sn.split('.')[0]}.${idx + 1}`
+            }));
+            return { ...sec, items: newItems };
         }
         return sec;
     }));
@@ -291,9 +337,15 @@ export default function QuotationEditor({ id }: { id?: string }) {
             ...sec,
             items: sec.items.map(it => {
                 if (it.id === itemId) {
-                    const updated = { ...it, [field]: value };
+                    let finalValue = value;
+                    if ((field === 'qty' || field === 'unitPrice') && value !== '') {
+                        finalValue = Math.max(0, parseFloat(value) || 0);
+                    }
+                    const updated = { ...it, [field]: finalValue };
                     if (field === 'qty' || field === 'unitPrice') {
-                        updated.amount = (updated.qty || 0) * (updated.unitPrice || 0);
+                        const q = typeof updated.qty === 'number' ? updated.qty : 0;
+                        const p = typeof updated.unitPrice === 'number' ? updated.unitPrice : 0;
+                        updated.amount = q * p;
                     }
                     return updated;
                 }
@@ -325,7 +377,7 @@ export default function QuotationEditor({ id }: { id?: string }) {
   const totalAmount = sections.reduce((sum, sec) => 
     sum + sec.items.reduce((secSum, it) => secSum + it.amount, 0), 0
   );
-  const afterDiscount = totalAmount - discount;
+  const afterDiscount = totalAmount - (Number(discount) || 0);
   const vatAmount = afterDiscount * 0.15;
   const grandTotal = afterDiscount + vatAmount;
 
@@ -408,7 +460,7 @@ export default function QuotationEditor({ id }: { id?: string }) {
     // --- PAGE 1: PROJECT SUMMARY ---
     dMeta(doc, yPos); // Meta info helper
     
-    yPos += 38;
+    yPos += 45;
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text('Quotation', pageWidth / 2, yPos, { align: 'center' });
@@ -423,48 +475,58 @@ export default function QuotationEditor({ id }: { id?: string }) {
 
     const summaryRows = sections.map(sec => {
       const secTotal = sec.items.reduce((sum, it) => sum + it.amount, 0);
-      return [sec.sn + ' ' + sec.title, '1', 'Item', secTotal.toLocaleString() + '.00'];
+      return [sec.sn, sec.title, '1', 'Item', secTotal.toLocaleString() + '.00'];
     });
 
     autoTable(doc, {
       startY: yPos + 15,
       margin: { top: 60, bottom: 30, left: margin, right: margin },
-      head: [['PROJECT SUMMARY', 'Qty', 'UNIT', 'Saudi Riyal']],
+      head: [[{ content: 'PROJECT SUMMARY', colSpan: 4 }, { content: 'Saudi Riyal', colSpan: 1, styles: { halign: 'right' } }]],
       body: summaryRows,
       theme: 'grid',
-      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontSize: 10, fontStyle: 'bold' },
-      styles: { fontSize: 8, fontStyle: 'bold' },
+      headStyles: { fillColor: [176, 196, 222], textColor: [0, 0, 0], fontSize: 10, fontStyle: 'bold' },
+      styles: { fontSize: 8, fontStyle: 'bold', textColor: [0, 0, 0] },
       columnStyles: { 
-        0: { cellWidth: pageWidth - margin * 2 - 75 },
-        1: { halign: 'center', cellWidth: 15 },
-        2: { halign: 'center', cellWidth: 20 },
-        3: { halign: 'right', cellWidth: 40 } 
+        0: { halign: 'center', cellWidth: 15 },
+        1: { cellWidth: pageWidth - margin * 2 - 85 },
+        2: { halign: 'center', cellWidth: 10 },
+        3: { halign: 'center', cellWidth: 20 },
+        4: { halign: 'right', cellWidth: 40 } 
       }
     });
 
     let currentY = (doc as any).lastAutoTable.finalY + 5;
     
     const summaryRowLine = (l: string, v: string, y: number) => {
-        doc.setFillColor(248, 250, 252);
+        doc.setFillColor(240, 240, 240);
         doc.rect(margin, y - 4, pageWidth - margin * 2, 6, 'F');
+        doc.setDrawColor(0);
+        doc.rect(margin, y - 4, pageWidth - margin * 2, 6, 'S');
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
         doc.setTextColor(0);
-        doc.text(l, 105, y, { align: 'center' });
-        doc.text(v, pageWidth - margin - 2, y, { align: 'right' });
+        doc.text(l, pageWidth / 2, y + 0.5, { align: 'center' });
+        doc.text(v, pageWidth - margin - 5, y + 0.5, { align: 'right' });
     };
 
     summaryRowLine('Total Amount', totalAmount.toLocaleString() + '.00', currentY);
     summaryRowLine('Special Discount', discount.toLocaleString() + '.00', currentY + 6);
-    summaryRowLine('Net Amount', afterDiscount.toLocaleString() + '.00', currentY + 12);
-    summaryRowLine('VAT (15%)', vatAmount.toLocaleString() + '.00', currentY + 18);
-    summaryRowLine('Grand Total', grandTotal.toLocaleString() + '.00', currentY + 24);
+    summaryRowLine('After Discount', afterDiscount.toLocaleString() + '.00', currentY + 12);
     
-    currentY += 34;
+    if (vatAmount > 0) {
+      summaryRowLine('VAT (15%)', vatAmount.toLocaleString() + '.00', currentY + 18);
+      summaryRowLine('Grand Total', grandTotal.toLocaleString() + '.00', currentY + 24);
+      currentY += 12;
+    }
+    
+    currentY += 22;
     doc.setFontSize(8);
-    doc.setDrawColor(226, 232, 240);
-    doc.rect(margin, currentY - 4, pageWidth - margin * 2, 8);
-    doc.text(`Project Value Amount in words: ${amountInWords}`, margin + 3, currentY + 1);
+    doc.setDrawColor(0);
+    doc.rect(margin, currentY - 4, pageWidth - margin * 2, 6, 'S');
+    doc.setFillColor(240, 240, 240);
+    doc.rect(margin, currentY - 4, pageWidth - margin * 2, 6, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Project Value Amount in words: ${amountInWords}`, margin + 2, currentY);
 
     yPos = currentY + 10;
 
@@ -480,10 +542,15 @@ export default function QuotationEditor({ id }: { id?: string }) {
         }
 
         yPos += 10;
-        doc.setFontSize(11);
+        doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(30, 41, 59);
-        doc.text(`${sec.sn} ${sec.title}`, margin, yPos);
+        doc.setFillColor(200, 200, 200);
+        doc.rect(margin, yPos - 5, pageWidth - margin * 2, 8, 'F');
+        doc.setDrawColor(0);
+        doc.rect(margin, yPos - 5, pageWidth - margin * 2, 8, 'S');
+        doc.setTextColor(0);
+        doc.text(`${sec.sn} ${sec.title}`, margin + 2, yPos + 0.5);
+        yPos += 3;
         
         const secItems = sec.items.map(it => [
             it.sn,
@@ -499,59 +566,87 @@ export default function QuotationEditor({ id }: { id?: string }) {
         const secTotal = sec.items.reduce((sum, it) => sum + it.amount, 0);
 
         autoTable(doc, {
-            startY: yPos + 5,
+            startY: yPos,
             margin: { top: 60, bottom: 30, left: margin, right: margin },
-            head: [['S/N', 'IMG', 'Sub Category', 'Description', 'UNIT', 'Qty', 'Unit Price', 'Amount']],
+            head: [['S/N', 'Image', 'Sub Category', 'Description', 'UNIT', 'Qty', 'Unit Price', 'Amount']],
             body: [
                 ...secItems,
                 [
-                    '', 
-                    '', 
-                    '',
-                    `SUB TOTAL FOR ${sec.title}`, 
-                    '', 
-                    '', 
-                    '', 
-                    secTotal.toLocaleString() + '.00'
+                    { content: `SUB TOTAL FOR ${sec.title.toUpperCase()}`, colSpan: 7, styles: { halign: 'center', fontStyle: 'bold', fillColor: [240, 240, 240] } },
+                    { content: secTotal.toLocaleString() + '.00', styles: { halign: 'right', fontStyle: 'bold', fillColor: [240, 240, 240] } }
                 ]
             ],
             theme: 'grid',
-            headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold' },
-            styles: { fontSize: 8, minCellHeight: 12, valign: 'middle' },
+            headStyles: { fillColor: [176, 196, 222], textColor: [0, 0, 0], fontStyle: 'bold' },
+            styles: { fontSize: 8, minCellHeight: 12, valign: 'middle', textColor: [0,0,0], lineColor: [0, 0, 0], lineWidth: 0.1 },
             columnStyles: {
-                0: { cellWidth: 12 },
-                1: { cellWidth: 20 },
-                2: { cellWidth: 35 },
-                3: { cellWidth: pageWidth - margin * 2 - 157 },
-                4: { cellWidth: 15, halign: 'center' },
-                5: { cellWidth: 15, halign: 'center' },
-                6: { cellWidth: 30, halign: 'right' },
-                7: { cellWidth: 30, halign: 'right', fontStyle: 'bold' },
+                0: { cellWidth: 10 },
+                1: { cellWidth: 18 },
+                2: { cellWidth: 25 },
+                3: { cellWidth: pageWidth - margin * 2 - 117 },
+                4: { cellWidth: 10, halign: 'center' },
+                5: { cellWidth: 10, halign: 'center' },
+                6: { cellWidth: 22, halign: 'right' },
+                7: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
             },
             didParseCell: (data) => {
-                if (data.section === 'body' && data.column.index === 1) {
+                if (data.section === 'body' && data.column.index === 1 && data.row.index < secItems.length) {
                     data.cell.text = [''];
                 }
             },
             didDrawCell: (data) => {
-                if (data.section === 'body' && data.row.index === secItems.length) {
-                    if (data.column.index === 3) {
-                        data.cell.styles.halign = 'right';
-                    }
-                }
-
                 if (data.section === 'body' && data.column.index === 1 && data.cell.raw && data.row.index < secItems.length) {
                     const imgData = data.cell.raw as string;
                     if (imgData && imgData.startsWith('data:image')) {
                         try {
-                            doc.addImage(imgData, 'JPEG', data.cell.x + 2, data.cell.y + 1, 16, 10);
+                            doc.addImage(imgData, 'JPEG', data.cell.x + 2, data.cell.y + 1, 14, 10);
                         } catch (e) {}
                     }
                 }
             }
         });
         
-        yPos = (doc as any).lastAutoTable.finalY + 5;
+        yPos = (doc as any).lastAutoTable.finalY + 10;
+    }
+
+    // --- TERMS & NOTES ---
+    if (termsAndConditions || notes.length > 0) {
+      if (yPos > pageHeight - 60) {
+        doc.addPage();
+        yPos = 60;
+      }
+
+      if (termsAndConditions) {
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Terms & Conditions:', margin, yPos);
+        yPos += 5;
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        const lines = doc.splitTextToSize(termsAndConditions, pageWidth - margin * 2);
+        doc.text(lines, margin, yPos);
+        yPos += (lines.length * 4) + 10;
+      }
+
+      if (notes.length > 0) {
+        if (yPos > pageHeight - 40) {
+          doc.addPage();
+          yPos = 60;
+        }
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Notes:', margin, yPos);
+        yPos += 5;
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        notes.forEach((note, idx) => {
+          if (note) {
+            const lines = doc.splitTextToSize(`${idx + 1}. ${note}`, pageWidth - margin * 2);
+            doc.text(lines, margin, yPos);
+            yPos += (lines.length * 4);
+          }
+        });
+      }
     }
 
     // --- APPLY HEADER/FOOTER TO ALL PAGES ---
@@ -570,40 +665,55 @@ export default function QuotationEditor({ id }: { id?: string }) {
     const margin = 15;
     const pageWidth = d.internal.pageSize.getWidth();
     
-    d.setFontSize(9);
+    // Draw box for meta info
+    d.setDrawColor(0);
+    d.setLineWidth(0.5);
+    d.rect(margin, y - 5, pageWidth - margin * 2, 45, 'S');
+
+    d.setFontSize(8);
     d.setFont('helvetica', 'bold');
-    d.text('To:', margin, y);
+    d.text('To:', margin + 2, y);
     d.setFont('helvetica', 'normal');
     d.text(d.splitTextToSize(to || '', 70), margin + 25, y);
     
     d.setFont('helvetica', 'bold');
-    d.text('Concern person:', margin, y + 6);
+    d.text('Attn:', margin + 2, y + 6);
     d.setFont('helvetica', 'normal');
     d.text(attn || '', margin + 25, y + 6);
     
     d.setFont('helvetica', 'bold');
-    d.text('Address:', margin, y + 12);
+    d.text('Address:', margin + 2, y + 12);
     d.setFont('helvetica', 'normal');
     d.text(d.splitTextToSize(address || '', 70), margin + 25, y + 12);
     
     d.setFont('helvetica', 'bold');
-    d.text('Project:', margin, y + 25);
+    d.text('Project:', margin + 2, y + 25);
     d.setFont('helvetica', 'normal');
     d.text(project || '', margin + 25, y + 25);
     
     d.setFont('helvetica', 'bold');
-    d.text('Email:', margin, y + 31);
+    d.text('Email:', margin + 2, y + 31);
     d.setTextColor(37, 99, 235);
     d.text(email || '', margin + 25, y + 31);
     d.setTextColor(0);
 
-    const rCol = pageWidth - 65;
+    if (description) {
+        d.setFont('helvetica', 'bold');
+        d.text('Description:', margin + 2, y + 37);
+        d.setFont('helvetica', 'normal');
+        d.text(d.splitTextToSize(description, 70), margin + 25, y + 37);
+    }
+
+    const rCol = pageWidth - 70;
     const metaLine = (l: string, v: string, py: number) => {
         d.setFont('helvetica', 'bold');
         d.text(l, rCol, py);
         d.setFont('helvetica', 'normal');
         d.text(v, rCol + 30, py);
     };
+
+    // Draw vertical middle divider line
+    d.line(pageWidth / 2 + 10, y - 5, pageWidth / 2 + 10, y + 40);
 
     metaLine('Date:', new Date(date).toLocaleDateString('en-GB'), y);
     metaLine('Quotation:', quotationNo, y + 6);
@@ -612,35 +722,18 @@ export default function QuotationEditor({ id }: { id?: string }) {
     metaLine('Revision:', revision, y + 24);
   };
 
-  const confirmQuotation = async () => {
-    try {
-      const res = await fetch(`/api/quotations/${quotationNo}/confirm`, {
-        method: 'POST'
-      });
-      
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Failed to confirm quotation');
-      }
-      
-      toast.success('Quotation confirmed and Sales Order generated');
-    } catch (err: any) {
-      toast.error(err.message);
-    }
-  };
-
-  const handleSaveQuote = async (asNewRevision: boolean = false) => {
+  const handleSaveQuote = async (asNewRevision: boolean = false, status: string = 'draft') => {
     try {
       // Logic for incrementing revision if saving as new revision
       let finalRevision = revision;
       let finalId = asNewRevision ? null : id;
       
       if (asNewRevision) {
-        const revMatch = revision.match(/(.*?)(\d+)$/);
+        const revMatch = revision.match(/R(\d+)/i);
         if (revMatch) {
-          finalRevision = revMatch[1] + (parseInt(revMatch[2]) + 1);
+          finalRevision = `R${parseInt(revMatch[1]) + 1}`;
         } else {
-          finalRevision = revision + ' - R1';
+          finalRevision = 'R2';
         }
         setRevision(finalRevision);
       }
@@ -680,6 +773,10 @@ export default function QuotationEditor({ id }: { id?: string }) {
         valid_until: validUntil,
         revision: finalRevision,
         parent_id: parentId,
+        description: description,
+        terms_and_conditions: termsAndConditions,
+        notes_json: JSON.stringify(notes),
+        status: status,
         items: flattenedItems
       };
 
@@ -706,12 +803,19 @@ export default function QuotationEditor({ id }: { id?: string }) {
     }
   };
 
+  const addNote = () => setNotes([...notes, '']);
+  const updateNote = (index: number, value: string) => {
+    const newNotes = [...notes];
+    newNotes[index] = value;
+    setNotes(newNotes);
+  };
+  const removeNote = (index: number) => setNotes(notes.filter((_, i) => i !== index));
+
   if (loading) return <div className="h-64 flex items-center justify-center text-slate-400 font-mono text-xs uppercase tracking-widest animate-pulse">Initializing Specialized Editor...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
-        <CardHeader className="bg-white border-b border-blue-100 py-6 px-10 flex flex-row items-center justify-between">
+    <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden w-full max-w-[100%] mx-auto">
+      <CardHeader className="bg-white border-b border-blue-100 py-6 px-10 flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-xl font-black uppercase tracking-widest text-blue-900">{id ? 'Edit Quotation' : 'Prepare Quotation'}</CardTitle>
             <p className="text-[10px] font-bold text-blue-600 uppercase tracking-[0.2em] mt-1 flex items-center gap-2">
@@ -730,16 +834,17 @@ export default function QuotationEditor({ id }: { id?: string }) {
             )}
             
             {id && (
-              <Button onClick={() => handleSaveQuote(true)} variant="outline" className="h-9 px-4 text-[10px] font-black uppercase tracking-widest border-blue-200 text-blue-600 hover:bg-blue-50 transition-all gap-2 shadow-sm">
+              <Button onClick={() => handleSaveQuote(true, 'sent')} variant="outline" className="h-9 px-4 text-[10px] font-black uppercase tracking-widest border-blue-200 text-blue-600 hover:bg-blue-50 transition-all gap-2 shadow-sm">
                 <FileText className="h-3.5 w-3.5" /> Save as New Revision
               </Button>
             )}
 
-            <Button onClick={confirmQuotation} variant="outline" className="h-9 px-4 text-[10px] font-black uppercase tracking-widest border-blue-200 text-blue-600 hover:bg-blue-50 transition-all gap-2 shadow-sm">
-              <PackageCheck className="h-3.5 w-3.5" /> Confirm Quote
+            <Button onClick={() => handleSaveQuote(false, 'sent')} variant="outline" className="h-9 px-6 text-[10px] font-black uppercase tracking-widest text-blue-600 hover:bg-blue-50 border border-blue-200 shadow-sm gap-2">
+              <Save className="h-3.5 w-3.5" /> {id ? 'Update Quotation' : 'Save Quotation'}
             </Button>
-            <Button onClick={() => handleSaveQuote(false)} className="h-9 px-6 text-[10px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-md gap-2">
-              <Save className="h-3.5 w-3.5" /> {id ? 'Update Existing' : 'Save Quote'}
+            
+            <Button onClick={() => handleSaveQuote(false, 'sent')} className="h-9 px-6 text-[10px] font-black uppercase tracking-widest bg-blue-600 hover:bg-blue-700 text-white shadow-md gap-2">
+              <PackageCheck className="h-3.5 w-3.5" /> Finalize Quote
             </Button>
           </div>
         </CardHeader>
@@ -749,34 +854,31 @@ export default function QuotationEditor({ id }: { id?: string }) {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
             <div className="lg:col-span-2 space-y-6 border-r border-blue-50 pr-10">
               <div className="flex items-center gap-2 mb-4">
-                <div className="h-5 w-1.5 bg-blue-600 rounded-full"></div>
+                <div className="h-5 w-1 bg-blue-600 rounded-sm"></div>
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-900">Client Information</h3>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Client Name</label>
-                  <Select value={to} onValueChange={handleCustomerChange}>
-                    <SelectTrigger className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs uppercase rounded-xl">
-                      <SelectValue placeholder="Select Client" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers.map(c => (
-                        <SelectItem key={c.id} value={c.name} className="text-[10px] font-bold py-2 uppercase">{c.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Combobox
+                    options={customers.map(c => ({ label: c.name, value: c.name }))}
+                    value={to}
+                    onValueChange={handleCustomerChange}
+                    placeholder="Select Client"
+                    className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs uppercase rounded-md w-full"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Concern person</label>
-                  <Input value={attn} onChange={e => setAttn(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-xl" />
+                  <Input value={attn} onChange={e => setAttn(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-md" />
                 </div>
                 <div className="md:col-span-2 space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Project Title</label>
-                  <Input value={project} onChange={e => setProject(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-xl" />
+                  <Input value={project} onChange={e => setProject(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-md" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Email Address</label>
-                  <Input type="email" value={email} onChange={e => setEmail(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-xl" />
+                  <Input type="email" value={email} onChange={e => setEmail(e.target.value)} className="h-10 border-blue-100 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all font-bold text-xs rounded-md" />
                 </div>
                 <div className="md:col-span-2 space-y-1.5">
                   <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Address</label>
@@ -787,34 +889,44 @@ export default function QuotationEditor({ id }: { id?: string }) {
                     className="w-full rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-bold text-slate-700 ring-offset-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
+                <div className="md:col-span-2 space-y-1.5">
+                  <label className="text-[9px] font-black uppercase text-blue-600/60 tracking-[0.1em]">Description</label>
+                  <textarea 
+                    value={description} 
+                    onChange={e => setDescription(e.target.value)} 
+                    rows={3}
+                    className="w-full rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-bold text-slate-700 ring-offset-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                    placeholder="Brief description about the project or note about the quotation"
+                  />
+                </div>
               </div>
             </div>
 
             <div className="space-y-6">
               <div className="flex items-center gap-2 mb-4">
-                <div className="h-5 w-1 bg-slate-400 rounded-full"></div>
+                <div className="h-5 w-1 bg-slate-400 rounded-sm"></div>
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800">Reference</h3>
               </div>
               <div className="space-y-4">
-                <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                <div className="grid grid-cols-2 items-center py-2 border-b border-slate-50">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Quote No.</span>
-                  <Input value={quotationNo} onChange={e => setQuotationNo(e.target.value)} className="h-8 w-32 border-none bg-blue-50 text-right font-mono font-black text-xs text-blue-600" />
+                  <Input size="sm" value={quotationNo} onChange={e => setQuotationNo(e.target.value)} className="w-full text-right font-mono font-black text-xs text-blue-600 rounded-md border-slate-100" />
                 </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                <div className="grid grid-cols-2 items-center py-2 border-b border-slate-50">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Date</span>
-                  <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-8 w-40 border-none bg-slate-50 text-right font-bold text-[10px] text-slate-800" />
+                  <Input size="sm" type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full text-right font-bold text-[10px] text-slate-800 rounded-md border-slate-100 [color-scheme:light]" />
                 </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                <div className="grid grid-cols-2 items-center py-2 border-b border-slate-50">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer ID</span>
-                  <Input value={customerId} onChange={e => setCustomerId(e.target.value)} className="h-8 w-32 border-none bg-slate-50 text-right font-bold text-xs text-slate-800" />
+                  <Input size="sm" value={customerId} onChange={e => setCustomerId(e.target.value)} className="w-full text-right font-bold text-xs text-slate-800 rounded-md border-slate-100" />
                 </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-50">
+                <div className="grid grid-cols-2 items-center py-2 border-b border-slate-50">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valid Until</span>
-                  <Input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className="h-8 w-40 border-none bg-slate-50 text-right font-bold text-[10px] text-slate-800" />
+                  <Input size="sm" type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className="w-full text-right font-bold text-[10px] text-slate-800 rounded-md border-slate-100 [color-scheme:light]" />
                 </div>
-                <div className="flex justify-between items-center">
+                <div className="grid grid-cols-2 items-center py-2 h-10">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Revision</span>
-                  <Input value={revision} onChange={e => setRevision(e.target.value)} className="h-8 w-32 border-none bg-slate-50 text-right font-bold text-xs text-slate-800" />
+                  <Input size="sm" value={revision} onChange={e => setRevision(e.target.value)} className="w-full text-right font-bold text-xs text-slate-800 rounded-md border-slate-100" />
                 </div>
               </div>
             </div>
@@ -822,15 +934,63 @@ export default function QuotationEditor({ id }: { id?: string }) {
 
           {/* Section 2: Line Items by Section */}
           <div className="space-y-12">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-2">
-                <div className="h-5 w-1.5 bg-blue-600 rounded-full"></div>
+                <div className="h-5 w-1 bg-blue-600 rounded-sm"></div>
                 <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-900">Quotation Breakdown</h3>
               </div>
-              <Button size="sm" onClick={addSection} className="h-8 gap-2 bg-blue-700 hover:bg-blue-800 text-[9px] font-black uppercase tracking-widest px-4 shadow-sm">
-                <Plus className="h-3.5 w-3.5 text-white" /> Add New Section
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => setShowSummary(!showSummary)} variant="outline" className="h-8 gap-2 border-blue-200 text-blue-700 hover:bg-blue-50 text-[9px] font-black uppercase tracking-widest px-4 shadow-sm rounded-md">
+                  {showSummary ? 'Hide Summary' : 'Show Summary'}
+                </Button>
+                <Button size="sm" onClick={addSection} className="h-8 gap-2 bg-blue-700 hover:bg-blue-800 text-[9px] font-black uppercase tracking-widest px-4 shadow-sm rounded-md">
+                  <Plus className="h-3.5 w-3.5 text-white" /> Add New Section
+                </Button>
+              </div>
             </div>
+
+            {showSummary && (
+              <div className="mb-8 border border-slate-200 rounded-md overflow-hidden shadow-sm">
+                <Table>
+                  <TableHeader className="bg-slate-50">
+                    <TableRow>
+                      <TableHead colSpan={2} className="text-xs font-black uppercase text-blue-950 tracking-widest h-10 px-6">Project Summary</TableHead>
+                      <TableHead colSpan={3} className="text-xs font-black uppercase text-blue-950 tracking-widest h-10 px-6 text-right">Saudi Riyal</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sections.map(sec => {
+                      const secTotal = sec.items.reduce((sum, it) => sum + (it.amount || 0), 0);
+                      return (
+                        <TableRow key={sec.id} className="border-b border-slate-100 bg-white hover:bg-slate-50/50">
+                          <TableCell className="w-16 text-[10px] font-bold text-slate-500 font-mono px-6 py-2">{sec.sn}</TableCell>
+                          <TableCell className="text-[10px] font-bold text-slate-800 uppercase px-6 py-2">{sec.title}</TableCell>
+                          <TableCell className="w-16 text-center text-[10px] font-bold text-slate-800 py-2">1</TableCell>
+                          <TableCell className="w-16 text-center text-[10px] font-bold text-slate-500 uppercase px-4 py-2">Item</TableCell>
+                          <TableCell className="text-right text-xs font-black text-slate-900 font-mono px-6 py-2">{secTotal.toLocaleString()}.00</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    <TableRow className="border-t-2 border-slate-200 bg-slate-50">
+                      <TableCell colSpan={4} className="text-right text-[10px] font-black uppercase text-slate-500 tracking-widest py-3 px-6">Total Amount</TableCell>
+                      <TableCell className="text-right text-xs font-black text-blue-950 font-mono py-3 px-6">{totalAmount.toLocaleString()}.00</TableCell>
+                    </TableRow>
+                    {Number(discount) > 0 && (
+                      <>
+                        <TableRow className="border-t border-slate-100 bg-slate-50/50">
+                          <TableCell colSpan={4} className="text-right text-[10px] font-black uppercase text-slate-500 tracking-widest py-3 px-6">Special Discount</TableCell>
+                          <TableCell className="text-right text-xs font-black text-blue-950 font-mono py-3 px-6">{discount.toLocaleString()}.00</TableCell>
+                        </TableRow>
+                        <TableRow className="border-t border-slate-200 bg-blue-50/50">
+                          <TableCell colSpan={4} className="text-right text-[10px] font-black uppercase text-blue-700 tracking-widest py-3 px-6">After Discount</TableCell>
+                          <TableCell className="text-right text-xs font-black text-blue-900 font-mono py-3 px-6">{(totalAmount - (Number(discount) || 0)).toLocaleString()}.00</TableCell>
+                        </TableRow>
+                      </>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
 
             {sections.map((section) => (
               <div key={section.id} className="space-y-4 border-l-4 border-slate-100 pl-6 pb-8">
@@ -839,55 +999,22 @@ export default function QuotationEditor({ id }: { id?: string }) {
                     <Input 
                       value={section.sn} 
                       onChange={e => updateSection(section.id, 'sn', e.target.value)} 
-                      className="h-8 w-16 border-none bg-slate-50 font-mono text-[10px] font-black text-slate-400" 
+                      className="h-8 w-16 border-slate-100 bg-transparent font-mono text-[10px] font-black text-slate-400 rounded-md hover:bg-slate-50 transition-all px-2" 
                     />
                     <div className="flex-1">
-                      <Select 
-                        value={section.title} 
+                      <Combobox
+                        options={[
+                          ...categories.map(cat => ({ label: cat.name, value: cat.name })),
+                          ...(section.title && !categories.some(c => c.name === section.title) ? [{ label: `Custom: ${section.title}`, value: section.title }] : [])
+                        ]}
+                        value={section.title}
                         onValueChange={val => updateSection(section.id, 'title', val)}
-                      >
-                        <SelectTrigger className="h-9 border-none bg-transparent font-black text-sm text-slate-800 uppercase tracking-tight w-full hover:bg-slate-50 transition-colors">
-                          <SelectValue placeholder="Select Category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.map(cat => (
-                            <SelectItem key={cat.id} value={cat.name} className="text-[10px] font-bold py-2 uppercase">
-                              {cat.name}
-                            </SelectItem>
-                          ))}
-                          {section.title && !categories.some(c => c.name === section.title) && (
-                             <SelectItem value={section.title} className="text-[10px] font-bold py-2 uppercase text-slate-400">
-                               Custom: {section.title}
-                             </SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select Category"
+                        className="h-9 border-slate-100 bg-transparent font-black text-sm text-slate-800 uppercase tracking-tight w-[680px] hover:bg-slate-50 transition-all rounded-md px-3"
+                      />
                     </div>
                   </div>
                   <div className="flex gap-2">
-                     <DropdownMenu>
-                      <DropdownMenuTrigger render={
-                        <Button variant="outline" size="sm" className="h-8 gap-2 border-slate-200 text-[8px] font-black uppercase tracking-widest px-3 bg-white hover:bg-slate-50">
-                          <Plus className="h-3 w-3 text-slate-400" /> Catalog
-                        </Button>
-                      } />
-                      <DropdownMenuContent align="end" className="w-56">
-                        <DropdownMenuGroup>
-                          <DropdownMenuLabel className="text-[9px] font-black uppercase tracking-widest text-slate-400">Add from Catalog</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          {templateItems
-                            .filter(item => {
-                              const sectionCategory = categories.find(c => c.name === section.title);
-                              return sectionCategory ? item.category_id === sectionCategory.id : true;
-                            })
-                            .map(item => (
-                              <DropdownMenuItem key={item.id} onClick={() => addFromTemplate(item, section.id)} className="text-[10px] font-bold py-2">
-                                {item.name}
-                              </DropdownMenuItem>
-                            ))}
-                        </DropdownMenuGroup>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                     <Button size="sm" variant="ghost" onClick={() => addItemToSection(section.id)} className="h-8 gap-2 text-[8px] font-black uppercase tracking-widest px-3 hover:bg-blue-50 hover:text-blue-600">
                       <Plus className="h-3 w-3" /> Add Item
                     </Button>
@@ -897,7 +1024,7 @@ export default function QuotationEditor({ id }: { id?: string }) {
                   </div>
                 </div>
 
-                <div className="border border-slate-100 rounded-xl overflow-hidden shadow-sm bg-white">
+                <div className="border border-slate-100 rounded-md overflow-hidden shadow-sm bg-white">
                   <Table>
                     <TableHeader className="bg-slate-50">
                       <TableRow className="h-10 border-none hover:bg-transparent">
@@ -916,7 +1043,7 @@ export default function QuotationEditor({ id }: { id?: string }) {
                       {section.items.map((item) => (
                         <TableRow key={item.id} className="hover:bg-slate-50/50 transition-colors border-b border-slate-50">
                           <TableCell className="px-4">
-                            <Input value={item.sn} onChange={e => updateItem(section.id, item.id, 'sn', e.target.value)} className="h-7 border-none bg-transparent font-mono text-[9px] font-extrabold text-slate-400" />
+                            <Input size="sm" value={item.sn} onChange={e => updateItem(section.id, item.id, 'sn', e.target.value)} className="font-mono text-[9px] font-black text-slate-400 rounded-md h-[38px] border-slate-100 bg-transparent hover:bg-slate-50 transition-all px-2 text-center" />
                           </TableCell>
                           <TableCell className="p-0">
                             <div className="flex justify-center items-center">
@@ -936,19 +1063,39 @@ export default function QuotationEditor({ id }: { id?: string }) {
                             </div>
                           </TableCell>
                           <TableCell>
-                             <Input value={item.subCategory} onChange={e => updateItem(section.id, item.id, 'subCategory', e.target.value)} placeholder="Sub Category" className="h-7 border-none bg-transparent font-black text-[10px] text-blue-600 uppercase" />
+                            <Combobox
+                              options={Array.from(new Set(templateItems.filter(t => t.name).map(t => t.name))).map(name => ({ label: name, value: name }))}
+                              value={item.subCategory || ''}
+                              onValueChange={val => updateItem(section.id, item.id, 'subCategory', val)}
+                              placeholder="Sub Category"
+                              className="h-[38px] border-slate-100 bg-transparent font-black text-[10px] text-blue-600 uppercase rounded-md hover:bg-slate-50 transition-all px-2"
+                            />
                           </TableCell>
                           <TableCell>
-                             <Input value={item.description} onChange={e => updateItem(section.id, item.id, 'description', e.target.value)} className="h-7 border-none bg-transparent font-bold text-xs text-slate-700" />
+                             <Textarea
+                               value={item.description}
+                               onChange={e => updateItem(section.id, item.id, 'description', e.target.value)}
+                               className="min-h-[38px] field-sizing-content font-bold text-xs text-slate-700 rounded-md border-slate-100 bg-transparent hover:bg-slate-50 transition-all resize-none overflow-hidden py-2"
+                               rows={1}
+                             />
                           </TableCell>
                           <TableCell>
-                             <Input value={item.unit} onChange={e => updateItem(section.id, item.id, 'unit', e.target.value)} className="h-7 border-none bg-transparent font-bold text-[10px] text-slate-500 uppercase" />
+                             <Combobox
+                               options={[
+                                 ...units.map(u => ({ label: u.name, value: u.name })),
+                                 ...(item.unit && !units.some(u => u.name === item.unit) ? [{ label: item.unit, value: item.unit }] : [])
+                               ]}
+                               value={item.unit}
+                               onValueChange={val => updateItem(section.id, item.id, 'unit', val)}
+                               placeholder="Unit"
+                               className="h-[38px] border-slate-100 bg-transparent font-bold text-[10px] text-slate-500 uppercase rounded-md hover:bg-slate-50 transition-all px-2"
+                             />
                           </TableCell>
                           <TableCell>
-                             <Input type="number" value={item.qty} onChange={e => updateItem(section.id, item.id, 'qty', parseFloat(e.target.value))} className="h-7 text-center bg-transparent border-none font-bold text-xs" />
+                             <Input size="sm" type="number" value={item.qty} onChange={e => updateItem(section.id, item.id, 'qty', e.target.value)} className="text-center font-bold text-xs rounded-md h-[38px] border-slate-100 bg-transparent hover:bg-slate-50 transition-all" min="0" />
                           </TableCell>
                           <TableCell>
-                             <Input type="number" value={item.unitPrice} onChange={e => updateItem(section.id, item.id, 'unitPrice', parseFloat(e.target.value))} className="h-7 text-right bg-transparent border-none font-mono font-bold text-slate-600 text-[11px]" />
+                             <Input size="sm" type="number" value={item.unitPrice} onChange={e => updateItem(section.id, item.id, 'unitPrice', e.target.value)} className="text-right font-mono font-bold text-slate-600 text-[11px] rounded-md h-[38px] border-slate-100 bg-transparent hover:bg-slate-50 transition-all" min="0" />
                           </TableCell>
                           <TableCell className="text-right font-black text-slate-900 font-mono text-[11px]">
                             {item.amount.toLocaleString()}.00
@@ -979,26 +1126,57 @@ export default function QuotationEditor({ id }: { id?: string }) {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 pt-8 border-t border-slate-100">
-            <div className="space-y-6">
-              <div className="p-8 bg-slate-50/50 rounded-2xl border border-slate-100 space-y-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Project Value in words</p>
-                <p className="text-[11px] font-bold text-slate-600 leading-relaxed uppercase italic">{amountInWords}</p>
-                <div className="pt-6 flex items-center gap-3">
-                  <div className="h-8 w-8 bg-white rounded-lg flex items-center justify-center border border-slate-200 shadow-sm">
-                    <Shield className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Authorized & Verified Commercial Document</p>
+            <div className="space-y-8">
+             <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-blue-600" />
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-800">Terms & Conditions</label>
                 </div>
+                <textarea 
+                  value={termsAndConditions} 
+                  onChange={e => setTermsAndConditions(e.target.value)} 
+                  rows={5}
+                  placeholder="Enter formal terms, credit policy, or project-specific conditions..."
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/30 px-5 py-4 text-xs font-medium text-slate-600 ring-offset-white focus:outline-none focus:ring-2 focus:ring-blue-500/10 transition-all"
+                />
               </div>
-              <div className="flex gap-4 p-5 border border-blue-100 bg-blue-50/50 rounded-2xl shadow-inner-white">
-                 <AlertCircle className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-                 <p className="text-[10px] text-blue-900/60 font-medium leading-relaxed">
-                   Summary nodes identified with <span className="font-bold">.0</span> suffixes (e.g. 1.0) occupy the primary project summary projection for institutional A4 exports.
-                 </p>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-blue-600" />
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-800">Operational Notes</label>
+                  </div>
+                  <Button onClick={addNote} size="sm" variant="ghost" className="h-7 text-[9px] font-black uppercase tracking-widest text-blue-600 hover:bg-blue-50 rounded-md">
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Add Note
+                  </Button>
+                </div>
+                
+                <div className="space-y-3">
+                  {notes.map((note, idx) => (
+                    <div key={idx} className="flex gap-2 group animate-in fade-in slide-in-from-left-2 transition-all">
+                      <Input 
+                        value={note} 
+                        onChange={e => updateNote(idx, e.target.value)} 
+                        placeholder={`Note item #${idx + 1}`}
+                        className="h-10 border-slate-200 bg-white text-xs font-medium focus:ring-2 focus:ring-blue-500/10 rounded-md"
+                      />
+                      <Button onClick={() => removeNote(idx)} variant="ghost" size="icon" className="h-10 w-10 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  {notes.length === 0 && (
+                    <div onClick={addNote} className="h-20 border-2 border-dashed border-slate-100 rounded-md flex flex-col items-center justify-center gap-2 group cursor-pointer hover:border-blue-200 hover:bg-blue-50/30 transition-all">
+                      <Plus className="h-5 w-5 text-slate-300 group-hover:text-blue-400" />
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 group-hover:text-blue-500">No active notes. Click to add.</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-3xl p-10 space-y-8 shadow-sm">
+            <div className="bg-white border border-slate-200 rounded-md p-10 space-y-8 shadow-sm">
               <div className="space-y-5">
                 <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-widest text-slate-400">
                   <span>Gross Sub Total</span>
@@ -1012,8 +1190,9 @@ export default function QuotationEditor({ id }: { id?: string }) {
                     <Input 
                       type="number" 
                       value={discount} 
-                      onChange={e => setDiscount(Number(e.target.value))} 
-                      className="h-9 w-32 border-slate-200 bg-slate-50 text-right font-mono font-black text-xs text-[#f87171] focus:ring-1 focus:ring-red-400" 
+                      onChange={e => setDiscount(e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))} 
+                      className="h-9 w-32 border-slate-200 bg-slate-50 text-right font-mono font-black text-xs text-[#f87171] focus:ring-1 focus:ring-red-400 rounded-md" 
+                      min="0"
                     />
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-400">-SAR</span>
                   </div>
@@ -1028,20 +1207,11 @@ export default function QuotationEditor({ id }: { id?: string }) {
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mb-2">Final Project Value</p>
                   <h2 className="text-4xl font-black font-mono tracking-tighter text-slate-900">SAR {grandTotal.toLocaleString()}.00</h2>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <div 
-                    onClick={() => handleSaveQuote(false)}
-                    className="h-12 w-12 bg-blue-50 rounded-2xl flex items-center justify-center border border-blue-100 shadow-sm text-blue-400 group hover:text-blue-600 hover:bg-blue-100 transition-all cursor-pointer"
-                  >
-                    <Save className="h-6 w-6" />
-                  </div>
-                </div>
               </div>
             </div>
           </div>
         </CardContent>
-      </Card>
-    </div>
+    </Card>
   );
 }
 const Shield = ({ className }: { className?: string }) => (

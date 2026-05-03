@@ -1,9 +1,10 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { 
-  ShoppingCart, 
-  Truck, 
-  Plus, 
+  ShoppingCart,
+  Package,
+  Truck,
+  Plus,
   Search, 
   MoreHorizontal, 
   FileCheck,
@@ -20,7 +21,8 @@ import {
   ChevronRight,
   PieChart as PieChartIcon,
   Users,
-  Trash2
+  Trash2,
+  DollarSign
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -58,13 +60,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel
 } from '@/components/ui/dropdown-menu';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { toast } from 'sonner';
 
 // --- SUPPLIER DETAILS ---
@@ -90,7 +86,7 @@ const SupplierDetails = ({ id, onBack, onEdit }: { id: number, onBack: () => voi
           ← Back to Registry
         </Button>
         <div className="flex gap-2">
-          <Button onClick={onEdit} className="h-9 text-[10px] font-black uppercase tracking-widest bg-amber-500 hover:bg-amber-600">Edit Profile</Button>
+          <Button onClick={onEdit} className="h-9 text-[10px] font-black uppercase tracking-widest bg-primary hover:bg-primary/90 text-white rounded-xl shadow-lg shadow-primary/20">Edit Profile</Button>
         </div>
       </div>
 
@@ -176,7 +172,7 @@ const PurchaseDashboard = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 py-2 border-b border-slate-200 bg-white/50 -mx-6 px-6 -mt-6 mb-6">
         <div>
           <h2 className="text-xl font-black tracking-tight text-slate-800 uppercase">Procurement Analytics</h2>
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Commercial Supply Chain & Payable Monitoring</p>
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Commercial Supply Chain & Purchase Monitoring</p>
         </div>
         <div className="flex items-center gap-3">
           <Button variant="outline" className="h-9 text-[10px] font-black uppercase tracking-widest border-slate-200">Export Report</Button>
@@ -217,7 +213,7 @@ const PurchaseDashboard = () => {
                 <Wallet className="h-4 w-4" />
               </div>
             </div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 font-mono">Gross Payables (Unpaid)</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 font-mono">Gross Purchases (Unpaid)</p>
             <h3 className="text-2xl font-black text-red-600 tracking-tight">SAR {(stats?.totalPayable || 0).toLocaleString()}.00</h3>
           </CardContent>
         </Card>
@@ -324,21 +320,96 @@ const BillForm = ({ onCancel, onSuccess, suppliers, projects }: {
   suppliers: any[], 
   projects: any[]
 }) => {
+  const [inventoryItems, setInventoryItems] = useState<any[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
-    bill_number: `BILL-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    bill_number: `PURCH-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+    date: new Date().toISOString().split('T')[0],
+    supplier_invoice_no: '',
+    supplier_invoice_date: new Date().toISOString().split('T')[0],
     supplier_id: '',
     project_id: '',
-    date: new Date().toISOString().split('T')[0],
-    due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    total_amount: 0,
-    vat_amount: 0
+    ownership_type: 'company',
+    items: [{ inventory_item_id: '', description: '', qty: '', unit_price: '', discount: '', tax: 0, amount: 0 }],
+    subtotal: 0,
+    vat_amount: 0,
+    total_amount: 0
   });
-  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/inventory')
+      .then(r => r.json())
+      .then(data => setInventoryItems(Array.isArray(data) ? data : []));
+  }, []);
+
+  const updateItem = (index: number, field: string, value: any) => {
+    const newItems = [...formData.items];
+    (newItems[index] as any)[field] = value;
+    
+    if (field === 'inventory_item_id') {
+      const item = inventoryItems.find(i => i.id.toString() === value);
+      if (item) {
+        newItems[index].description = item.name;
+        // Do not auto-populate unit_price
+      }
+    }
+    
+    const qty = Number(newItems[index].qty) || 0;
+    const price = Number(newItems[index].unit_price) || 0;
+    const discount = Number(newItems[index].discount) || 0;
+    
+    if (['qty', 'unit_price', 'discount', 'inventory_item_id'].includes(field)) {
+      newItems[index].tax = (qty * price - discount) * 0.15;
+    }
+
+    const tax = Number(newItems[index].tax) || 0;
+    
+    newItems[index].amount = (qty * price) - discount + tax;
+    
+    const subtotal = newItems.reduce((sum, item) => sum + ((Number(item.qty)||0) * (Number(item.unit_price)||0) - (Number(item.discount)||0)), 0);
+    const vat = newItems.reduce((sum, item) => sum + (Number(item.tax)||0), 0);
+    const total = subtotal + vat;
+
+    setFormData(prev => ({ 
+      ...prev, 
+      items: newItems,
+      subtotal,
+      vat_amount: vat,
+      total_amount: total
+    }));
+  };
+
+  const addItem = () => {
+    setFormData(prev => ({
+      ...prev,
+      items: [...prev.items, { inventory_item_id: '', description: '', qty: '', unit_price: '', discount: '', tax: 0, amount: 0 }]
+    }));
+  };
+
+  const removeItem = (index: number) => {
+    if (formData.items.length === 1) return;
+    const newItems = formData.items.filter((_, i) => i !== index);
+    const subtotal = newItems.reduce((sum, item) => sum + ((Number(item.qty)||0) * (Number(item.unit_price)||0) - (Number(item.discount)||0)), 0);
+    const vat = newItems.reduce((sum, item) => sum + (Number(item.tax)||0), 0);
+    const total = subtotal + vat;
+
+    setFormData(prev => ({ 
+      ...prev, 
+      items: newItems,
+      subtotal,
+      vat_amount: vat,
+      total_amount: total
+    }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.supplier_id) {
       toast.error('Please select a supplier');
+      return;
+    }
+    if (formData.items.some(item => !item.inventory_item_id && !item.description)) {
+      toast.error('Please complete all item lines');
       return;
     }
 
@@ -348,16 +419,17 @@ const BillForm = ({ onCancel, onSuccess, suppliers, projects }: {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...formData,
+          ...formData, // Server will ignore unused fields if done correctly, wait no, let's pass strictly what is needed
+          due_date: formData.date, // Add due_date if API needs it
           total_amount: Number(formData.total_amount),
-          vat_amount: Number(formData.total_amount) * 0.15,
+          vat_amount: Number(formData.vat_amount),
           supplier_id: Number(formData.supplier_id),
-          project_id: formData.project_id ? Number(formData.project_id) : null
+          project_id: formData.project_id && formData.project_id !== 'none' ? Number(formData.project_id) : null
         }),
       });
 
-      if (!res.ok) throw new Error('Failed to record purchase entry');
-      toast.success('Liability recorded successfully');
+      if (!res.ok) throw new Error('Failed to record purchase');
+      toast.success('Purchase recorded and inventory updated');
       onSuccess();
     } catch (err: any) {
       toast.error(err.message);
@@ -366,13 +438,15 @@ const BillForm = ({ onCancel, onSuccess, suppliers, projects }: {
     }
   };
 
+  const selectedSupplier = suppliers.find(s => s.id.toString() === formData.supplier_id);
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between mb-2">
         <div>
           <h2 className="text-xl font-black tracking-tight text-slate-800 uppercase">Purchase Entry Voucher</h2>
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-1 flex items-center gap-2">
-            <ShoppingCart className="h-3.5 w-3.5 text-[#2563eb]" /> Official Commercial Payable Record
+            <ShoppingCart className="h-3.5 w-3.5 text-[#2563eb]" /> Official Commercial Purchase Record
           </p>
         </div>
         <Button variant="ghost" onClick={onCancel} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-800">
@@ -382,101 +456,222 @@ const BillForm = ({ onCancel, onSuccess, suppliers, projects }: {
 
       <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden">
         <form onSubmit={handleSubmit}>
-          <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-6 px-10">
-            <CardTitle className="text-[11px] font-black uppercase tracking-[0.2em] flex items-center gap-2 text-slate-800">
-               Reference ID: <span className="text-[#2563eb]">{formData.bill_number}</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-10 space-y-10">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div className="space-y-6 border-r border-slate-100 pr-10">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="h-5 w-1 bg-[#2563eb] rounded-full"></div>
-                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800">Vendor Entity</h3>
+          <CardContent className="p-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2 border-b border-slate-100 pb-8">
+              {/* Left Column */}
+              <div className="space-y-2">
+                <div className="flex items-center">
+                  <span className="w-40 text-[11px] font-bold text-slate-500">Purchase No:</span>
+                  <Input size="sm" value={formData.bill_number} onChange={e => setFormData(prev => ({ ...prev, bill_number: e.target.value }))} className="flex-1 font-mono font-black text-xs text-blue-600 bg-blue-50/50" />
                 </div>
-                
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Select Supplier</label>
-                  <Select value={formData.supplier_id} onValueChange={(v) => setFormData(prev => ({ ...prev, supplier_id: v }))}>
-                    <SelectTrigger className="h-10 border-slate-200 bg-white font-bold text-sm">
-                      <SelectValue placeholder="Identify supplier entity" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {suppliers.map(s => (
-                        <SelectItem key={s.id} value={s.id.toString()} className="font-bold text-xs uppercase">{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="flex items-center">
+                  <span className="w-40 text-[11px] font-bold text-slate-500">Purchase Date:</span>
+                  <Input size="sm" type="date" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} className="flex-1 font-bold text-xs" />
                 </div>
-
-                <div className="space-y-1.5 pt-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Building2 className="h-3 w-3 text-slate-400" />
-                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Project Mapping (Optional)</label>
-                  </div>
-                  <Select value={formData.project_id} onValueChange={(v) => setFormData(prev => ({ ...prev, project_id: v }))}>
-                    <SelectTrigger className="h-10 border-slate-200 bg-white font-bold text-sm">
-                      <SelectValue placeholder="Allocate to Project Cost Center" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none" className="font-black text-[9px] uppercase tracking-widest text-slate-300">Unallocated / General Overhead</SelectItem>
-                      {projects.map(p => (
-                        <SelectItem key={p.id} value={p.id.toString()} className="font-bold text-xs uppercase tracking-tight">{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">This will automatically appear in the project financial ledger.</p>
+                <div className="flex items-center">
+                  <span className="w-40 text-[11px] font-bold text-slate-500">Supplier Invoice No:</span>
+                  <Input size="sm" value={formData.supplier_invoice_no} onChange={e => setFormData(prev => ({ ...prev, supplier_invoice_no: e.target.value }))} className="flex-1 font-mono text-xs" />
+                </div>
+                <div className="flex items-center">
+                  <span className="w-40 text-[11px] font-bold text-slate-500">Invoice Date:</span>
+                  <Input size="sm" type="date" value={formData.supplier_invoice_date} onChange={e => setFormData(prev => ({ ...prev, supplier_invoice_date: e.target.value }))} className="flex-1 font-bold text-xs" />
                 </div>
               </div>
 
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="h-5 w-1 bg-slate-400 rounded-full"></div>
-                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-800">Timeline & Exposure</h3>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Post Date</label>
-                    <Input type="date" value={formData.date} onChange={e => setFormData(prev => ({ ...prev, date: e.target.value }))} className="h-10 border-slate-200 bg-white font-bold text-sm" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest text-[#2563eb]">Due Date</label>
-                    <Input type="date" value={formData.due_date} onChange={e => setFormData(prev => ({ ...prev, due_date: e.target.value }))} className="h-10 border-slate-200 bg-white font-bold text-sm text-[#2563eb]" />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5 pt-4">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Gross Invoice Value (Inc. VAT)</label>
-                  <div className="relative">
-                    <Input 
-                      type="number" 
-                      step="0.01" 
-                      value={formData.total_amount} 
-                      onChange={e => setFormData(prev => ({ ...prev, total_amount: Number(e.target.value) }))} 
-                      className="h-12 border-slate-200 bg-slate-50/50 focus:bg-white transition-all font-black text-xl pl-12 text-slate-900 shadow-inner" 
+              {/* Right Column */}
+              <div className="space-y-2">
+                <div className="flex items-center">
+                  <span className="w-40 text-[11px] font-bold text-slate-500">Supplier Name:</span>
+                  <div className="flex-1">
+                    <Combobox
+                      options={suppliers.map(s => ({ label: s.name, value: s.id.toString() }))}
+                      value={formData.supplier_id}
+                      onValueChange={(v) => setFormData(prev => ({ ...prev, supplier_id: v }))}
+                      placeholder="Select Supplier"
+                      className="w-full h-8 text-xs border-slate-200"
                     />
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">SAR</span>
                   </div>
-                  <div className="flex justify-between items-center px-1 mt-2">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic">Calculated VAT (15%):</span>
-                    <span className="text-[10px] font-black text-slate-800">SAR {(formData.total_amount * 0.15).toLocaleString(undefined, {minimumFractionDigits:2})}</span>
-                  </div>
+                </div>
+                <div className="flex items-center">
+                  <span className="w-40 text-[11px] font-bold text-slate-500">Supplier VAT:</span>
+                  <Input size="sm" value={selectedSupplier?.vat_number || ""} readOnly className="flex-1 bg-slate-50 text-slate-500 font-mono text-xs" placeholder="Auto-filled" />
+                </div>
+                <div className="flex items-center">
+                  <span className="w-40 text-[11px] font-bold text-slate-500">Supplier Address:</span>
+                  <Input size="sm" value={selectedSupplier?.address || ""} readOnly className="flex-1 bg-slate-50 text-slate-500 text-xs" placeholder="Auto-filled" />
                 </div>
               </div>
             </div>
 
-            <div className="pt-8 flex justify-end gap-3 border-t border-slate-100">
-              <Button type="button" variant="outline" onClick={onCancel} className="h-11 px-8 text-[11px] font-black uppercase tracking-widest border-slate-200">
-                Discard
-              </Button>
-              <Button 
-                type="submit" 
-                disabled={submitting} 
-                className="h-11 px-10 text-[11px] font-black uppercase tracking-widest bg-[#2563eb] hover:bg-[#1d4ed8] text-white shadow-lg shadow-blue-500/10 gap-2"
-              >
-                {submitting ? 'Recording...' : <><Save className="h-4 w-4" /> Commit to Ledger</>}
-              </Button>
+            <div className="mt-6">
+              <div className="border border-slate-200 overflow-hidden shadow-sm bg-white">
+                <Table>
+                  <TableHeader className="bg-slate-100 border-b border-black">
+                    <TableRow className="border-none hover:bg-slate-100">
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 border-r border-slate-200 px-4 h-10 w-16 text-center">#</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 border-r border-slate-200 px-4 h-10 w-[20%]">Select Item</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 border-r border-slate-200 h-10">Description</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 border-r border-slate-200 h-10 text-center w-20">Qty</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 border-r border-slate-200 h-10 text-right w-24">Unit {`(Price)`}</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 border-r border-slate-200 h-10 text-right w-24">Discount</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 border-r border-slate-200 h-10 text-right w-24">Tax</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase text-slate-800 h-10 text-right w-28 pr-4">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {formData.items.map((item, idx) => (
+                      <TableRow key={idx} className="border-b border-slate-200 hover:bg-slate-50/50 transition-colors group">
+                        <TableCell className="px-2 py-0 h-10 text-center text-xs font-black text-slate-600 border-r border-slate-200 bg-slate-50/50">
+                          <div className="flex items-center justify-between h-full">
+                            <span className="w-5 text-center">{idx + 1}.</span>
+                            {formData.items.length > 1 ? (
+                              <button type="button" onClick={() => removeItem(idx)} className="p-1 rounded text-slate-300 hover:text-red-500 hover:bg-white border border-transparent hover:border-slate-200 transition-all opacity-0 group-hover:opacity-100">
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            ) : (
+                              <div className="w-5" />
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="p-0 border-r border-slate-200">
+                          <Combobox
+                            options={inventoryItems.map(i => ({ label: `[${i.sku}] ${i.name}`, value: i.id.toString() }))}
+                            value={item.inventory_item_id}
+                            onValueChange={(v) => updateItem(idx, 'inventory_item_id', v)}
+                            placeholder="Select Item..."
+                          />
+                        </TableCell>
+                        <TableCell className="p-0 border-r border-slate-200">
+                          <Input 
+                            value={item.description} 
+                            onChange={(e) => updateItem(idx, 'description', e.target.value)}
+                            className="h-10 border-none rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 px-3 text-xs"
+                            placeholder="Description..."
+                          />
+                        </TableCell>
+                        <TableCell className="p-0 border-r border-slate-200">
+                          <Input 
+                            type="number"
+                            value={item.qty} 
+                            onChange={(e) => updateItem(idx, 'qty', e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))}
+                            className="h-10 border-none rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-center font-bold px-1 text-xs"
+                            min="0"
+                          />
+                        </TableCell>
+                        <TableCell className="p-0 border-r border-slate-200">
+                          <Input 
+                            type="number"
+                            value={item.unit_price} 
+                            onChange={(e) => updateItem(idx, 'unit_price', e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))}
+                            className="h-10 border-none rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-right font-bold px-3 text-xs"
+                            min="0"
+                          />
+                        </TableCell>
+                        <TableCell className="p-0 border-r border-slate-200">
+                          <Input 
+                            type="number"
+                            value={item.discount} 
+                            onChange={(e) => updateItem(idx, 'discount', e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))}
+                            className="h-10 border-none rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-right font-bold px-3 text-xs text-red-600"
+                            min="0"
+                          />
+                        </TableCell>
+                        <TableCell className="p-0 border-r border-slate-200">
+                          <Input 
+                            type="number"
+                            value={item.tax} 
+                            onChange={(e) => updateItem(idx, 'tax', e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))}
+                            className="h-10 border-none rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 text-right font-bold px-3 text-xs text-blue-600"
+                            min="0"
+                          />
+                        </TableCell>
+                        <TableCell className="p-3 text-right font-mono font-bold text-slate-800 bg-slate-50/30 text-xs">
+                          {(Number(item.amount) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                
+                <div className="p-1 border-t border-slate-200 bg-slate-50">
+                   <Button type="button" onClick={addItem} variant="ghost" size="sm" className="h-6 px-3 text-[10px] font-black uppercase tracking-widest text-[#2563eb] hover:bg-blue-100">
+                     + Add row
+                   </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 border-t border-slate-200 pt-6 flex justify-between items-start">
+              <div>
+                <div className="flex items-center gap-2 mb-4">
+                  <Building2 className="h-5 w-5 text-[#2563eb]" />
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-900">PURCHASE OWNERSHIP / ALLOCATION</h3>
+                </div>
+                <div className="flex items-start gap-8">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-slate-500 tracking-widest mb-2 block">OWNERSHIP TYPE</label>
+                      <div className="flex items-center gap-4">
+                        <button 
+                          type="button" 
+                          onClick={() => setFormData(prev => ({...prev, ownership_type: 'company', project_id: 'none'}))}
+                          className={`h-10 px-6 rounded-xl text-[11px] font-black uppercase tracking-widest transition-colors ${formData.ownership_type === 'company' ? 'bg-[#c39f60] text-white shadow-sm border border-[#b28f52]' : 'bg-[#fafaf9] text-slate-900 border border-slate-200 hover:bg-slate-100'}`}
+                        >
+                          COMPANY (GLOBAL)
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setFormData(prev => ({...prev, ownership_type: 'project'}))}
+                          className={`h-10 px-6 rounded-xl text-[11px] font-black uppercase tracking-widest transition-colors ${formData.ownership_type === 'project' ? 'bg-[#c39f60] text-white shadow-sm border border-[#b28f52]' : 'bg-[#fafaf9] text-slate-900 border border-slate-200 hover:bg-slate-100'}`}
+                        >
+                          SPECIFIC PROJECT
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {formData.ownership_type === 'project' && (
+                      <div className="w-[380px] animate-in fade-in slide-in-from-top-2">
+                        <Combobox
+                          options={projects.map(p => ({ label: p.name, value: p.id.toString() }))}
+                          value={formData.project_id === 'none' ? '' : formData.project_id}
+                          onValueChange={(v) => setFormData(prev => ({ ...prev, project_id: v }))}
+                          placeholder="Select project..."
+                          className="h-10 w-full rounded-xl px-4 bg-white font-bold text-xs text-slate-900 border-slate-200 hover:bg-slate-50 hover:border-slate-300 ring-2 ring-transparent focus-within:ring-slate-200"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col items-end gap-4">
+                <div className="w-80 border border-slate-200 divide-y divide-slate-200">
+                  <div className="flex justify-between items-center px-4 py-2 bg-slate-50">
+                     <span className="font-medium text-sm text-slate-600">SubTotal:</span>
+                     <span className="font-mono font-medium text-sm text-slate-800">{(Number(formData.subtotal) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                  </div>
+                  <div className="flex justify-between items-center px-4 py-2 bg-slate-50">
+                     <span className="font-medium text-sm text-slate-600">VAT 15%:</span>
+                     <span className="font-mono font-medium text-sm text-slate-800">{(Number(formData.vat_amount) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                  </div>
+                  <div className="flex justify-between items-center px-4 py-3 bg-slate-100">
+                     <span className="font-bold text-slate-800">Total:</span>
+                     <span className="font-mono text-base font-bold text-slate-900 border-b-2 border-double border-slate-400 pb-0.5">
+                       {(Number(formData.total_amount) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                     </span>
+                  </div>
+                </div>
+
+                <div className="w-80">
+                  <Button 
+                    type="submit" 
+                    disabled={submitting}
+                    className="w-full h-11 px-8 text-[11px] font-black uppercase tracking-widest bg-[#c39f60] hover:bg-[#b28f52] text-white shadow-sm border border-[#b28f52] rounded-xl transition-colors"
+                  >
+                    {submitting ? 'Saving...' : 'Save Purchase'}
+                  </Button>
+                </div>
+              </div>
             </div>
           </CardContent>
         </form>
@@ -666,9 +861,9 @@ const BillsView = ({ onLogNewBill }: { onLogNewBill: () => void }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold tracking-tight text-slate-800 uppercase px-1">Purchase Bills</h2>
+        <h2 className="text-xl font-bold tracking-tight text-slate-800 uppercase px-1">Purchases</h2>
         <Button onClick={onLogNewBill} className="bg-[#2563eb] h-9 text-[11px] font-bold uppercase tracking-wider shadow-md hover:shadow-lg transition-all">
-          <Plus className="mr-2 h-4 w-4" /> Log New Bill
+          <Plus className="mr-2 h-4 w-4" /> Log New Purchase
         </Button>
       </div>
 
@@ -690,7 +885,7 @@ const BillsView = ({ onLogNewBill }: { onLogNewBill: () => void }) => {
           <Table>
             <TableHeader className="bg-slate-50/50">
               <TableRow className="hover:bg-transparent border-b border-slate-100">
-                <TableHead className="font-black text-slate-400 text-[10px] h-12 px-8 uppercase tracking-[0.15em] text-nowrap">Bill ID</TableHead>
+                <TableHead className="font-black text-slate-400 text-[10px] h-12 px-8 uppercase tracking-[0.15em] text-nowrap">Purchase ID</TableHead>
                 <TableHead className="font-black text-slate-400 text-[10px] h-12 px-8 uppercase tracking-[0.15em]">Supplier Entity</TableHead>
                 <TableHead className="font-black text-slate-400 text-[10px] h-12 px-8 uppercase tracking-[0.15em]">Due Date</TableHead>
                 <TableHead className="font-black text-slate-400 text-[10px] h-12 px-8 uppercase tracking-[0.15em]">Project Linked</TableHead>
@@ -724,7 +919,7 @@ const BillsView = ({ onLogNewBill }: { onLogNewBill: () => void }) => {
                   </TableCell>
                   <TableCell className="px-8 py-5 text-right font-black text-slate-900 text-sm font-mono tracking-tighter">{(bill.total_amount || 0).toLocaleString()}.00</TableCell>
                   <TableCell className="px-8 py-5 text-center">
-                  <Badge className={bill.status === 'paid' ? "bg-blue-100 text-blue-700 hover:bg-blue-100 border-none font-black text-[9px] uppercase tracking-widest px-2" : "bg-amber-50 text-amber-600 hover:bg-amber-50 border border-amber-100 font-black text-[9px] uppercase tracking-widest px-2"}>
+                  <Badge className={bill.status === 'paid' ? "bg-blue-100 text-blue-700 hover:bg-blue-100 border-none font-black text-[9px] uppercase tracking-widest px-2" : "bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 font-black text-[9px] uppercase tracking-widest px-2"}>
                       {bill.status.toUpperCase()}
                     </Badge>
                   </TableCell>
@@ -841,7 +1036,7 @@ const SuppliersView = ({ onOnboard }: { onOnboard: () => void }) => {
                                <FileText className="mr-2 h-4 w-4 text-[#2563eb]" /> Audit Profile
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setSelectedId(sup.id); setView('edit'); }} className="text-[10px] font-black py-2.5 uppercase tracking-wide text-slate-600">
-                               <ArrowUpRight className="mr-2 h-4 w-4 text-amber-500" /> Edit Record
+                               <ArrowUpRight className="mr-2 h-4 w-4 text-primary" /> Edit Record
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => deleteSupplier(sup.id)} className="text-[10px] font-black py-2.5 uppercase tracking-wide text-red-600 text-nowrap">
@@ -862,7 +1057,7 @@ const SuppliersView = ({ onOnboard }: { onOnboard: () => void }) => {
                   </div>
                 </div>
                 <div className="text-right border-l border-slate-100 pl-6 h-12 flex flex-col justify-center">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1 text-nowrap">Payables Exposure</p>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1 text-nowrap">Outstanding Balance</p>
                   <p className={`text-lg font-black tracking-tighter ${(sup.balance || 0) > 0 ? 'text-red-600 font-mono' : 'text-slate-300 font-mono'}`}>
                     SAR {(sup.balance || 0).toLocaleString()}.00
                   </p>
@@ -906,6 +1101,7 @@ export default function PurchaseModule({ subModule, initialParams }: { subModule
 
   const renderView = () => {
     switch (view) {
+      case 'Purchases':
       case 'Bills':
         return <BillsView onLogNewBill={() => setView('LogBill')} />;
       case 'Suppliers':

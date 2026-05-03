@@ -505,12 +505,6 @@ export default function MasterDataModule({ subModule, initialParams }: { subModu
       </div>
 
       {activeTab === 'Company Details' && <CompanyDetailsManagement />}
-      {activeTab === 'System Config' && (
-        <div className="p-20 text-center space-y-4">
-          <Database className="h-12 w-12 text-slate-200 mx-auto" />
-          <p className="text-sm font-bold text-slate-400 uppercase tracking-[0.2em]">Extended configurations coming soon</p>
-        </div>
-      )}
     </div>
   );
 }

@@ -69,14 +69,14 @@ interface NavItem {
 // --- CONSTANTS ---
 const NAV_ITEMS: NavItem[] = [
   { title: 'Dashboard', icon: LayoutDashboard, module: 'dashboard' },
-  { title: 'Sales', icon: Receipt, module: 'sales', subItems: ['Quotations', 'Sales Orders', 'Customers'] },
-  { title: 'Purchases', icon: ShoppingCart, module: 'purchases', subItems: ['Bills', 'Suppliers'] },
+  { title: 'Sales', icon: Receipt, module: 'sales', subItems: ['Quotations', 'Draft Quotations', 'Sales Orders', 'Customers'] },
+  { title: 'Purchases', icon: ShoppingCart, module: 'purchases', subItems: ['Purchases', 'Suppliers'] },
   { title: 'Inventory', icon: Package, module: 'inventory', subItems: ['Stock List'] },
-  { title: 'Accounting', icon: BookOpen, module: 'accounting', subItems: ['Chart of Accounts', 'Journal Entries', 'Payables (Bills)', 'Receivables (Invoices)', 'Bank Reconciliation', 'Account Analytics'] },
-  { title: 'Projects', icon: Building2, module: 'projects', subItems: ['Active Projects', 'Project Ledger', 'Project Sub categories', 'Project Categories'] },
+  { title: 'Accounting', icon: BookOpen, module: 'accounting', subItems: ['Chart of Accounts', 'Ledger', 'Journal Entries', 'Payables', 'Receivables', 'Bank Reconciliation', 'Account Analytics', 'Financial Tracking'] },
+  { title: 'Projects', icon: Building2, module: 'projects', subItems: ['Financial Tracking', 'Active Projects', 'Units Registry', 'Project Sub categories', 'Project Categories'] },
   { title: 'Reports', icon: BarChart3, module: 'reports', subItems: ['Profit & Loss', 'Balance Sheet (Horizontal)', 'Trial Balance', 'Project Cost Analysis'] },
   { title: 'Users', icon: Users, module: 'users', subItems: ['My Profile', 'Manage Users'] },
-  { title: 'Master Data', icon: Settings, module: 'master-data', subItems: ['Company Details', 'System Config'] },
+  { title: 'Master Data', icon: Settings, module: 'master-data', subItems: ['Company Details'] },
 ];
 
 export default function App() {
@@ -152,32 +152,32 @@ export default function App() {
           <div className="space-y-6">
             {/* Financial Quick Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card className="border-blue-100 shadow-sm border-none bg-white">
-                <CardContent className="p-4">
-                  <p className="text-[11px] text-blue-600 font-bold uppercase mb-1">Account Receivables</p>
-                  <h3 className="text-2xl font-bold text-slate-800 tracking-tight">1,245,600.00</h3>
-                  <p className="text-[10px] text-blue-600 mt-1 font-semibold underline cursor-pointer" onClick={() => { setCurrentModule('reports'); setCurrentSubModule('Balance Sheet (Horizontal)'); }}>View Horizontal Balance Sheet</p>
+              <Card className="border-none bg-white shadow-sm hover:shadow-md transition-shadow">
+                <CardContent className="p-5">
+                  <p className="text-[11px] text-primary font-black uppercase mb-1.5 tracking-widest">Account Receivables</p>
+                  <h3 className="text-2xl font-black text-slate-900 tracking-tighter">1,245,600.00</h3>
+                  <p className="text-[10px] text-primary mt-2 font-bold underline cursor-pointer hover:text-primary/70" onClick={() => { setCurrentModule('reports'); setCurrentSubModule('Balance Sheet (Horizontal)'); }}>View Analytics</p>
                 </CardContent>
               </Card>
-              <Card className="border-amber-100 shadow-sm border-none bg-white">
-                <CardContent className="p-4">
-                  <p className="text-[11px] text-amber-600 font-bold uppercase mb-1">Account Payables</p>
-                  <h3 className="text-2xl font-bold text-slate-800 tracking-tight">842,150.25</h3>
-                  <p className="text-[10px] text-slate-400 mt-1 font-medium">Including Sub-contractors</p>
+              <Card className="border-none bg-white shadow-sm hover:shadow-md transition-shadow">
+                <CardContent className="p-5">
+                  <p className="text-[11px] text-slate-400 font-black uppercase mb-1.5 tracking-widest">Account Payables</p>
+                  <h3 className="text-2xl font-black text-slate-900 tracking-tighter">842,150.25</h3>
+                  <p className="text-[10px] text-slate-400 mt-2 font-bold">Total Vendor Exposure</p>
                 </CardContent>
               </Card>
-              <Card className="border-orange-100 shadow-sm border-none bg-white">
-                <CardContent className="p-4">
-                  <p className="text-[11px] text-orange-600 font-bold uppercase mb-1">VAT Liability (15%)</p>
-                  <h3 className="text-2xl font-bold text-orange-600 tracking-tight">60,517.46</h3>
-                  <p className="text-[10px] text-slate-400 mt-1 font-medium">Current Period Accrual</p>
+              <Card className="border-none bg-white shadow-sm hover:shadow-md transition-shadow">
+                <CardContent className="p-5">
+                  <p className="text-[11px] text-primary font-black uppercase mb-1.5 tracking-widest">VAT Liability (15%)</p>
+                  <h3 className="text-2xl font-black text-primary tracking-tighter">60,517.46</h3>
+                  <p className="text-[10px] text-slate-400 mt-2 font-bold">ZATCA Compliant Summary</p>
                 </CardContent>
               </Card>
-              <Card className="border-emerald-100 shadow-sm border-none bg-white border-l-4 border-l-blue-500">
-                <CardContent className="p-4">
-                  <p className="text-[11px] text-blue-600 font-bold uppercase mb-1">Estimated Zakat</p>
-                  <h3 className="text-2xl font-bold text-slate-800 tracking-tight">32,450.00</h3>
-                  <p className="text-[10px] text-slate-400 mt-1 font-medium">Provision Based on Capital</p>
+              <Card className="border-none bg-white shadow-sm border-l-4 border-l-primary hover:shadow-md transition-shadow">
+                <CardContent className="p-5">
+                  <p className="text-[11px] text-primary font-black uppercase mb-1.5 tracking-widest">System Health</p>
+                  <h3 className="text-2xl font-black text-slate-900 tracking-tighter truncate">STABLE</h3>
+                  <p className="text-[10px] text-slate-400 mt-2 font-bold">Nodes Fully Synchronized</p>
                 </CardContent>
               </Card>
             </div>
@@ -287,69 +287,67 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="h-screen w-full flex items-center justify-center bg-[#fdfbf7] p-4 relative overflow-hidden">
-        {/* Subtle Decorative Elements */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-50 rounded-full blur-[120px] opacity-50" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-bisque-100 rounded-full blur-[120px] opacity-50" />
+      <div className="min-h-screen elegant-bg flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Elegant backdrop elements */}
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-primary/20 rounded-full mix-blend-multiply filter blur-[120px] animate-pulse" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-primary/10 rounded-full mix-blend-multiply filter blur-[120px] animate-pulse animation-delay-2000" />
         
-        <Toaster position="top-center" />
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: "easeOut" }} className="w-full max-w-md z-10">
-          <div className="text-center mb-8 space-y-4">
-            <div className="mx-auto w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-200">
-               <Building2 className="h-8 w-8 text-white" />
+        <Toaster position="top-center" richColors />
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5, ease: "easeOut" }} className="w-full max-w-md z-10">
+          <div className="text-center mb-10 space-y-4">
+            <div className="mx-auto w-20 h-20 bg-primary rounded-[2rem] flex items-center justify-center shadow-2xl shadow-primary/20 border border-white/20">
+               <Building2 className="h-10 w-10 text-white" />
             </div>
             <div className="space-y-1">
-              <h1 className="text-xl font-black tracking-tight text-blue-900 uppercase">Accounting & Fit-out</h1>
-              <p className="text-[10px] text-blue-600/60 font-bold uppercase tracking-[0.2em]">Institutional Resource Planning</p>
+              <h1 className="text-3xl font-black tracking-tighter text-slate-900 uppercase leading-none font-heading">ITQAN <span className="text-primary font-light italic">ERP</span></h1>
+              <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.3em] mt-2">Institutional Intelligence System</p>
             </div>
           </div>
 
-          <Card className="border-none shadow-[0_20px_50px_rgba(0,0,0,0.05)] bg-white rounded-3xl overflow-hidden">
-            <CardContent className="p-10 space-y-8">
-              <div className="space-y-2 text-center">
-                <h2 className="text-2xl font-black text-slate-800">Login</h2>
-                <p className="text-slate-400 text-xs font-medium">Enter your credentials to access the secure ledger.</p>
-              </div>
+          <div className="elegant-card p-10 space-y-8">
+            <div className="space-y-2 text-center">
+              <h2 className="text-2xl font-black text-slate-800 tracking-tight">System Gateway</h2>
+              <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest opacity-60">Authentication Protocol Required</p>
+            </div>
 
-              <form onSubmit={handleLogin} className="space-y-5">
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Staff Identity</label>
-                    <Input 
-                      placeholder="Username" 
-                      value={username} 
-                      onChange={e => setUsername(e.target.value)} 
-                      className="h-12 bg-slate-50 border-slate-100 focus:bg-white focus:ring-blue-500 transition-all rounded-xl font-semibold" 
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest px-1">Security Key</label>
-                    <Input 
-                      type="password" 
-                      placeholder="••••••••" 
-                      value={password} 
-                      onChange={e => setPassword(e.target.value)} 
-                      className="h-12 bg-slate-50 border-slate-100 focus:bg-white focus:ring-blue-500 transition-all rounded-xl font-semibold" 
-                    />
-                  </div>
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.15em] ml-1">Staff Identity</label>
+                  <Input 
+                    placeholder="Username" 
+                    value={username} 
+                    onChange={e => setUsername(e.target.value)} 
+                    className="h-14 bg-white/50 border-slate-200 focus:bg-white focus:ring-primary/20 focus:border-primary rounded-2xl font-bold text-sm px-5" 
+                  />
                 </div>
-
-                <Button type="submit" className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-black tracking-widest text-[11px] rounded-xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98]">
-                  AUTHENTICATE & ENTER
-                </Button>
-              </form>
-
-              <div className="pt-4 border-t border-slate-50 flex justify-between items-center">
-                <p className="text-[9px] text-slate-300 font-bold uppercase tracking-widest">© 2026 ERP v4.0</p>
-                <div className="flex gap-2">
-                   <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-                   <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">System Online</span>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.15em] ml-1">Security Key</label>
+                  <Input 
+                    type="password" 
+                    placeholder="••••••••" 
+                    value={password} 
+                    onChange={e => setPassword(e.target.value)} 
+                    className="h-14 bg-white/50 border-slate-200 focus:bg-white focus:ring-primary/20 focus:border-primary rounded-2xl font-bold text-sm px-5" 
+                  />
                 </div>
               </div>
-            </CardContent>
-          </Card>
+
+              <Button type="submit" className="w-full h-14 bg-primary hover:bg-primary/90 text-white font-black tracking-[0.15em] text-[12px] rounded-2xl transition-all shadow-xl shadow-primary/20 active:scale-[0.98] uppercase">
+                Initialize Access
+              </Button>
+            </form>
+
+            <div className="pt-6 border-t border-slate-100 flex justify-between items-center opacity-40 hover:opacity-100 transition-opacity">
+              <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Core v4.2.0-STABLE</p>
+              <div className="flex gap-2 items-center">
+                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                 <span className="text-[9px] text-slate-500 font-extrabold uppercase tracking-tight">Mainframe Linked</span>
+              </div>
+            </div>
+          </div>
           
-          <p className="text-center text-[10px] text-zinc-400 font-bold uppercase tracking-[0.2em] mt-8 opacity-50">
+          <p className="text-center text-[10px] text-slate-400 font-black uppercase tracking-[0.4em] mt-10 opacity-30">
             Powered by Itqan Core Technologies
           </p>
         </motion.div>
@@ -358,45 +356,50 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#fdfbf7] font-sans text-[#1e293b] antialiased overflow-hidden">
+    <div className="flex h-screen elegant-bg font-sans text-[#1e293b] antialiased overflow-hidden">
       <Toaster position="bottom-left" richColors />
       
       {/* --- SIDEBAR --- */}
-      <aside className="w-56 lg:w-64 bg-slate-900 text-white flex flex-shrink-0 flex-col border-r border-slate-800 transition-all duration-300">
-        <div className="p-4 lg:p-6 border-b border-slate-800">
-          <div className="flex items-center gap-2 lg:gap-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-               <Building2 className="h-5 w-5 text-white" />
+      <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-shrink-0 flex-col transition-all duration-500 shadow-2xl z-40">
+        <div className="p-8 border-b border-sidebar-border bg-sidebar-accent/50">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center shadow-xl shadow-primary/20 border border-white/40">
+               <Building2 className="h-6 w-6 text-white" />
             </div>
             <div>
-              <h1 className="text-[11px] font-black tracking-tight uppercase text-white leading-none mb-1">Accounting & Fit-out</h1>
-              <p className="text-[9px] text-blue-400/60 font-bold uppercase tracking-widest">Enterprise Suite</p>
+              <h1 className="text-[13px] font-black tracking-tight uppercase text-sidebar-foreground leading-none mb-1.5 font-heading">ITQAN <span className="font-light italic text-primary">ERP</span></h1>
+              <p className="text-[10px] text-primary/60 font-black uppercase tracking-[0.2em]">Institutional</p>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto pt-4 lg:pt-6 scrollbar-hide select-none">
-          <div className="px-5 mb-3 text-[9px] lg:text-[10px] uppercase tracking-[0.2em] text-blue-500 font-bold">Main Menu</div>
-          <div className="px-2 lg:px-3 space-y-1">
+        <nav className="flex-1 overflow-y-auto pt-8 pb-10 scrollbar-hide select-none px-4 space-y-1.5">
+          <div className="px-5 mb-4 text-[10px] uppercase tracking-[0.3em] text-primary font-black opacity-60">Strategic Navigation</div>
+          <div className="space-y-1">
             {NAV_ITEMS.map((item) => (
               <div key={item.title}>
                 <button
                   onClick={() => {
-                    setCurrentModule(item.module);
-                    setCurrentSubModule(''); // Reset sub-module when clicking main menu
-                    if (item.subItems) toggleMenu(item.title);
+                    if (item.subItems) {
+                      toggleMenu(item.title);
+                    } else {
+                      setCurrentModule(item.module);
+                      setCurrentSubModule('');
+                    }
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded transition-all group text-sm ${
-                    currentModule === item.module ? 'bg-blue-500 text-white font-semibold shadow-md' : 'text-blue-100 hover:bg-slate-800/50 hover:bg-[#3b82f6]/10'
+                  className={`w-full flex items-center justify-between px-5 py-4 rounded-2xl transition-all duration-300 group text-[11px] uppercase tracking-wider font-black ${
+                    currentModule === item.module 
+                    ? 'bg-primary text-white shadow-xl shadow-primary/30' 
+                    : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <item.icon className={`h-4 w-4 ${currentModule === item.module ? 'text-white' : 'text-blue-400 opacity-80'}`} />
+                  <div className="flex items-center gap-4">
+                    <item.icon className={`h-4 w-4 transition-transform duration-300 group-hover:scale-110 ${currentModule === item.module ? 'text-white' : 'text-primary/70'}`} />
                     {item.title}
                   </div>
                   {item.subItems && (
                     <motion.div animate={{ rotate: openMenus.includes(item.title) ? 90 : 0 }}>
-                      <ChevronRight className={`h-3 w-3 ${currentModule === item.module ? 'text-white' : 'text-blue-600'}`} />
+                      <ChevronRight className={`h-3 w-3 ${currentModule === item.module ? 'text-white' : 'text-sidebar-foreground/30'}`} />
                     </motion.div>
                   )}
                 </button>
@@ -407,7 +410,7 @@ export default function App() {
                       initial={{ height: 0, opacity: 0 }}
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden space-y-1 mt-1 ml-4 border-l border-slate-700/50"
+                      className="overflow-hidden space-y-1 mt-1.5 ml-6 border-l border-sidebar-border"
                     >
                       {item.subItems.map(sub => (
                         <button
@@ -416,10 +419,15 @@ export default function App() {
                             setCurrentModule(item.module);
                             setCurrentSubModule(sub);
                           }}
-                          className={`w-full text-left py-1.5 px-4 text-[11px] font-medium transition-all ${
-                            currentModule === item.module && currentSubModule === sub ? 'text-white bg-blue-500/20' : 'text-blue-400 hover:text-white'
+                          className={`w-full text-left py-3 px-6 text-[10px] font-black uppercase tracking-[0.15em] transition-all duration-300 relative group ${
+                            currentModule === item.module && currentSubModule === sub 
+                            ? 'text-primary bg-primary/5 shadow-inner' 
+                            : 'text-sidebar-foreground/40 hover:text-sidebar-foreground hover:translate-x-2'
                           }`}
                         >
+                          {currentModule === item.module && currentSubModule === sub && (
+                            <motion.div layoutId="active-dot" className="absolute left-3 top-1/2 -translate-y-1/2 w-1 h-1 rounded-full bg-primary shadow-sm shadow-primary/50" />
+                          )}
                           {sub}
                         </button>
                       ))}
@@ -429,49 +437,58 @@ export default function App() {
               </div>
             ))}
           </div>
-
-
         </nav>
 
-        <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center gap-3 text-white">
-          <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center font-bold text-xs uppercase shadow-inner">
+        <div className="p-6 border-t border-sidebar-border bg-sidebar-accent/30 backdrop-blur-xl flex items-center gap-4">
+          <div className="h-10 w-10 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center font-black text-[11px] uppercase shadow-inner text-primary">
             {user.username.slice(0, 2)}
           </div>
           <div className="overflow-hidden flex-1">
-            <p className="text-xs font-bold truncate leading-none mb-1">{user.username}</p>
-            <p className="text-[10px] text-blue-400/60 font-semibold uppercase tracking-widest leading-none">Administrator</p>
+            <p className="text-[11px] font-black uppercase tracking-widest truncate leading-none mb-1.5 text-sidebar-foreground">{user.username}</p>
+            <p className="text-[9px] text-primary/50 font-bold uppercase tracking-[0.3em] leading-none">{user.role}</p>
           </div>
-          <button onClick={handleLogout} className="p-1.5 hover:bg-slate-800 rounded transition-colors">
-            <LogOut className="h-3.5 w-3.5 text-blue-500" />
+          <button onClick={handleLogout} className="p-2.5 hover:bg-red-500/10 rounded-xl transition-all group active:scale-95">
+            <LogOut className="h-4 w-4 text-sidebar-foreground/30 group-hover:text-red-500 transition-colors" />
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         {/* Header Bar */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 shadow-sm z-10">
-          <div className="flex items-center gap-6">
+        <header className="elegant-header px-10 h-24 flex items-center justify-between shrink-0">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-3 text-[10px] font-black text-primary uppercase tracking-[0.4em] opacity-80 mb-2">
+               <Shield className="h-3 w-3" />
+               Itqan Secure Environment
+            </div>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase leading-none font-heading">
+              {currentModule.replace('-', ' ')} <span className="text-slate-300 font-light mx-2">/</span> <span className="text-primary">{currentSubModule || 'Overview'}</span>
+            </h2>
           </div>
           
-          <div className="flex items-center gap-5">
-            <div className="flex flex-col items-end">
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">FISCAL YEAR 2026</span>
-              <span className="text-[11px] font-bold text-blue-600">SAR (Saudi Riyals)</span>
-            </div>
-            <div className="w-9 h-9 border border-slate-200 rounded-lg flex items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors shadow-sm">
-              <span role="img" aria-label="notifications" className="text-sm">🔔</span>
+          <div className="flex items-center gap-8">
+
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 border-2 border-white bg-white/50 rounded-2xl flex items-center justify-center cursor-pointer hover:bg-white hover:shadow-xl transition-all duration-500 group relative">
+                <span role="img" aria-label="notifications" className="text-lg group-hover:scale-110 transition-transform">🔔</span>
+                <span className="absolute top-0 right-0 w-3 h-3 bg-red-500 border-2 border-white rounded-full translate-x-1 -translate-y-1" />
+              </div>
+              <div className="text-right hidden md:block">
+                 <p className="text-[11px] font-black text-slate-900 uppercase tracking-widest leading-none mb-1">{user.username}</p>
+                 <p className="text-[9px] text-primary font-bold uppercase tracking-widest opacity-60">Project Controller</p>
+              </div>
             </div>
           </div>
         </header>
 
         {/* Content Area */}
-        <section className="flex-1 overflow-y-auto p-6 scroll-smooth bg-[#f8fafc]">
+        <section className="flex-1 overflow-y-auto p-10 scroll-smooth custom-scrollbar relative">
           <motion.div 
             key={`${currentModule}-${currentSubModule}`}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-            className="max-w-screen-xl mx-auto space-y-6 pb-12"
+            initial={{ opacity: 0, scale: 0.98, filter: 'blur(10px)' }}
+            animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+            transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+            className="max-w-screen-xl mx-auto space-y-10 pb-20"
           >
             {renderModule()}
           </motion.div>

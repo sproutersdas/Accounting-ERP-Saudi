@@ -21,12 +21,14 @@ import {
   CheckCircle,
   FileSearch,
   Printer,
+  DollarSign,
   TrendingUp,
   Edit,
   Trash2,
   Eye,
   MoreVertical,
-  Save
+  Save,
+  Activity
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -51,6 +53,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Combobox } from '@/components/ui/combobox';
 import {
   Select,
   SelectContent,
@@ -67,6 +70,8 @@ import {
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import FinancialTracking from './FinancialTracking';
+import LedgerManager from './LedgerManager';
 
 // --- INVOICES VIEW (MOVED FROM SALES) ---
 const InvoicesView = () => {
@@ -75,13 +80,15 @@ const InvoicesView = () => {
   const [loading, setLoading] = useState(true);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [company, setCompany] = useState<any>(null);
-  const [newInvoice, setNewInvoice] = useState({
+  const [newInvoice, setNewInvoice] = useState<any>({
     invoice_number: `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
     customer_id: '',
     date: new Date().toISOString().split('T')[0],
     due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    total_amount: 0,
-    vat_amount: 0
+    total_amount: '',
+    vat_amount: '',
+    payment_mode: 'Cash',
+    payment_reference: ''
   });
 
   const fetchData = async () => {
@@ -167,7 +174,7 @@ const InvoicesView = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'paid': return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100 border-none font-bold text-[10px]">PAID</Badge>;
-      case 'pending': return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none font-bold text-[10px]">PENDING</Badge>;
+      case 'pending': return <Badge className="bg-primary/10 text-primary hover:bg-primary/20 border-none font-bold text-[10px]">PENDING</Badge>;
       case 'overdue': return <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-none font-bold text-[10px]">OVERDUE</Badge>;
       default: return <Badge variant="outline" className="uppercase text-[10px]">{status}</Badge>;
     }
@@ -295,42 +302,71 @@ const InvoicesView = () => {
              <form onSubmit={handleCreateInvoice} className="space-y-4 py-4">
               <div className="space-y-1.5">
                 <Label className="text-[10px] font-black uppercase text-slate-400">Invoice No.</Label>
-                <Input readOnly value={newInvoice.invoice_number} className="h-9 text-xs bg-slate-50 border-slate-200 font-mono" />
+                  <Input size="sm" readOnly value={newInvoice.invoice_number} className="bg-slate-50 font-mono" />
               </div>
 
               <div className="space-y-1.5">
                 <Label className="text-[10px] font-black uppercase text-slate-400">Customer</Label>
-                <Select value={newInvoice.customer_id} onValueChange={(v) => setNewInvoice(prev => ({ ...prev, customer_id: v }))}>
-                  <SelectTrigger className="h-9 text-xs border-slate-200">
-                    <SelectValue placeholder="Select Customer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customers.map(c => (
-                      <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={customers.map(c => ({ label: c.name, value: c.id.toString() }))}
+                  value={newInvoice.customer_id?.toString() || ""}
+                  onValueChange={(v) => setNewInvoice(prev => ({ ...prev, customer_id: v }))}
+                  placeholder="Select Customer"
+                  className="h-10"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-black uppercase text-slate-400">Issue Date</Label>
-                  <Input type="date" value={newInvoice.date} onChange={e => setNewInvoice(prev => ({ ...prev, date: e.target.value }))} className="h-9 text-xs border-slate-200" />
+                  <Input type="date" value={newInvoice.date} onChange={e => setNewInvoice(prev => ({ ...prev, date: e.target.value }))} />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-black uppercase text-slate-400">Due Date</Label>
-                  <Input type="date" value={newInvoice.due_date} onChange={e => setNewInvoice(prev => ({ ...prev, due_date: e.target.value }))} className="h-9 text-xs border-slate-200" />
+                  <Input type="date" value={newInvoice.due_date} onChange={e => setNewInvoice(prev => ({ ...prev, due_date: e.target.value }))} />
                 </div>
               </div>
 
               <div className="space-y-1.5">
                 <Label className="text-[10px] font-black uppercase text-slate-400">Amount (Excl. VAT)</Label>
-                <div className="relative">
-                  <Input type="number" step="0.01" value={newInvoice.total_amount} onChange={e => setNewInvoice(prev => ({ ...prev, total_amount: Number(e.target.value) }))} className="h-10 text-lg font-bold border-slate-200 pl-10" />
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">SAR</span>
-                </div>
-                <p className="text-[10px] text-slate-400 font-medium">VAT (15%) will be calculated as: {(Number(newInvoice.total_amount) * 0.15).toLocaleString()}.00 SAR</p>
+                <Input 
+                   icon={DollarSign}
+                   type="number" 
+                   step="0.01" 
+                   value={newInvoice.total_amount} 
+                   onChange={e => setNewInvoice((prev: any) => ({ ...prev, total_amount: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)) }))} 
+                   min="0"
+                />
+                <p className="text-[10px] text-slate-400 font-medium pl-4">VAT (15%) will be calculated as: {(Number(newInvoice.total_amount) * 0.15).toLocaleString()}.00 SAR</p>
               </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-[10px] font-black uppercase text-slate-400">Mode of Payment</Label>
+                <Combobox
+                  options={[
+                    { label: 'Cash', value: 'Cash' },
+                    { label: 'Bank Transfer', value: 'Bank Transfer' },
+                    { label: 'Cheque', value: 'Cheque' }
+                  ]}
+                  value={newInvoice.payment_mode || "Cash"}
+                  onValueChange={(v) => setNewInvoice((prev: any) => ({ ...prev, payment_mode: v }))}
+                  placeholder="Select Payment Mode"
+                  className="h-10"
+                />
+              </div>
+
+              {(newInvoice.payment_mode === 'Bank Transfer' || newInvoice.payment_mode === 'Cheque') && (
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-black uppercase text-slate-400">
+                    {newInvoice.payment_mode === 'Cheque' ? 'Cheque Number' : 'Transaction ID'}
+                  </Label>
+                  <Input 
+                    value={newInvoice.payment_reference} 
+                    onChange={e => setNewInvoice((prev: any) => ({ ...prev, payment_reference: e.target.value }))} 
+                    placeholder={newInvoice.payment_mode === 'Cheque' ? 'CHQ-...' : 'TRN-...'}
+                  />
+                </div>
+              )}
 
               <DialogFooter>
                 <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white h-11 text-xs font-black uppercase tracking-[0.1em] rounded-xl shadow-lg shadow-blue-600/20">Generate Invoice</Button>
@@ -344,8 +380,7 @@ const InvoicesView = () => {
         <CardHeader className="border-b border-slate-100 px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <Input placeholder="Search invoices..." className="pl-9 h-9 text-xs bg-slate-50 border-slate-200" />
+              <Input icon={Search} placeholder="Search invoices..." />
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" className="h-9 text-[10px] font-bold text-slate-600 border-slate-200">
@@ -489,16 +524,13 @@ export function ChartOfAccounts() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-[10px] font-black uppercase text-slate-400">Type</Label>
-                <Select value={newAccount.type} onValueChange={v => setNewAccount({...newAccount, type: v})}>
-                  <SelectTrigger className="h-10">
-                    <SelectValue placeholder="Select Type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'].map(t => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'].map(t => ({ label: t, value: t }))}
+                  value={newAccount.type || ""}
+                  onValueChange={v => setNewAccount({ ...newAccount, type: v })}
+                  placeholder="Select Type"
+                  className="h-10"
+                />
               </div>
               <Button type="submit" className="w-full bg-[#2563eb] h-11 text-xs font-black uppercase tracking-widest">Create Account</Button>
             </form>
@@ -526,9 +558,27 @@ export function ChartOfAccounts() {
                 </TableCell>
                 <TableCell className="text-right font-mono font-bold text-slate-700">{(acc.balance || 0).toLocaleString()}.00</TableCell>
                 <TableCell className="text-right px-6">
-                  <Button variant="ghost" size="sm" className="gap-2 h-8 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 uppercase tracking-wider rounded-xl shadow-sm px-4">
-                    <ExternalLink className="h-3 w-3" /> Ledger
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger render={
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-400 hover:text-blue-700 transition-colors">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    } />
+                    <DropdownMenuContent align="end" className="w-44 bg-white rounded-xl shadow-xl border-blue-50">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem className="text-[11px] font-bold py-3 uppercase tracking-wide px-4 focus:bg-blue-50 focus:text-blue-700 cursor-pointer">
+                          <Eye className="mr-2 h-3.5 w-3.5 text-blue-500" /> View Ledger
+                        </DropdownMenuItem>
+                        <DropdownMenuItem className="text-[11px] font-bold py-3 uppercase tracking-wide px-4 focus:bg-blue-50 focus:text-blue-700 cursor-pointer">
+                          <Edit className="mr-2 h-3.5 w-3.5 text-primary" /> Edit Details
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator className="bg-blue-50" />
+                        <DropdownMenuItem className="text-[11px] font-bold py-3 uppercase tracking-wide px-4 focus:bg-red-50 text-red-600 focus:text-red-700 cursor-pointer">
+                          <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete Account
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </TableCell>
               </TableRow>
             ))}
@@ -631,13 +681,13 @@ function JournalEntriesList({ onPost }: { onPost: () => void }) {
 function JournalEntryForm({ onBack }: { onBack: () => void }) {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<any[]>([]);
-  const [newEntry, setNewEntry] = useState({
+  const [newEntry, setNewEntry] = useState<any>({
     date: new Date().toISOString().split('T')[0],
     description: '',
     reference: '',
     items: [
-      { account_id: '', debit: 0, credit: 0, memo: '' },
-      { account_id: '', debit: 0, credit: 0, memo: '' }
+      { account_id: '', debit: '', credit: '', memo: '' },
+      { account_id: '', debit: '', credit: '', memo: '' }
     ]
   });
 
@@ -658,8 +708,8 @@ function JournalEntryForm({ onBack }: { onBack: () => void }) {
 
   const handlePost = async (e: React.FormEvent) => {
     e.preventDefault();
-    const totalDebit = newEntry.items.reduce((s, i) => s + i.debit, 0);
-    const totalCredit = newEntry.items.reduce((s, i) => s + i.credit, 0);
+    const totalDebit = newEntry.items.reduce((s, i) => s + (Number(i.debit) || 0), 0);
+    const totalCredit = newEntry.items.reduce((s, i) => s + (Number(i.credit) || 0), 0);
 
     if (totalDebit !== totalCredit) {
       toast.error('Entry is not balanced! Debits must equal Credits.');
@@ -680,7 +730,7 @@ function JournalEntryForm({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const addLine = () => setNewEntry({...newEntry, items: [...newEntry.items, { account_id: '', debit: 0, credit: 0, memo: '' }]});
+  const addLine = () => setNewEntry({...newEntry, items: [...newEntry.items, { account_id: '', debit: '', credit: '', memo: '' }]});
   const removeLine = (idx: number) => {
     if (newEntry.items.length <= 2) {
       toast.error('Journal entry requires at least 2 lines');
@@ -749,23 +799,17 @@ function JournalEntryForm({ onBack }: { onBack: () => void }) {
                 {newEntry.items.map((item, idx) => (
                   <TableRow key={idx} className="border-b border-slate-50 last:border-none">
                     <TableCell className="px-6 py-2">
-                      <Select 
-                        value={item.account_id.toString()} 
+                      <Combobox
+                        options={accounts.map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
+                        value={(item.account_id || "").toString()}
                         onValueChange={v => {
                           const items = [...newEntry.items];
                           items[idx].account_id = v;
-                          setNewEntry({...newEntry, items});
+                          setNewEntry({ ...newEntry, items });
                         }}
-                      >
-                        <SelectTrigger className="h-9 text-xs border-slate-100 bg-white shadow-none font-bold uppercase transition-colors">
-                          <SelectValue placeholder="Select Account" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {accounts.map(acc => (
-                            <SelectItem key={acc.id} value={acc.id.toString()}>{acc.code} - {acc.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Select Account"
+                        className="h-9 text-xs border-slate-100 bg-white shadow-none font-bold uppercase transition-colors"
+                      />
                     </TableCell>
                     <TableCell className="w-32">
                       <Input 
@@ -774,9 +818,10 @@ function JournalEntryForm({ onBack }: { onBack: () => void }) {
                         value={item.debit} 
                         onChange={e => {
                           const items = [...newEntry.items];
-                          items[idx].debit = Number(e.target.value);
+                          items[idx].debit = e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value));
                           setNewEntry({...newEntry, items});
                         }}
+                        min="0"
                       />
                     </TableCell>
                     <TableCell className="w-32">
@@ -786,9 +831,10 @@ function JournalEntryForm({ onBack }: { onBack: () => void }) {
                         value={item.credit} 
                         onChange={e => {
                           const items = [...newEntry.items];
-                          items[idx].credit = Number(e.target.value);
+                          items[idx].credit = e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value));
                           setNewEntry({...newEntry, items});
                         }}
+                        min="0"
                       />
                     </TableCell>
                     <TableCell className="px-6 text-right">
@@ -834,11 +880,11 @@ export function BankReconciliation() {
   const [systemTransactions, setSystemTransactions] = useState<any[]>([]);
   const [matches, setMatches] = useState<any[]>([]);
   
-  const [newRecon, setNewRecon] = useState({
+  const [newRecon, setNewRecon] = useState<any>({
     account_id: '',
     statement_date: new Date().toISOString().split('T')[0],
-    statement_balance: 0,
-    ledger_balance: 0
+    statement_balance: '',
+    ledger_balance: ''
   });
 
   const fetchData = async () => {
@@ -985,7 +1031,7 @@ export function BankReconciliation() {
                          <TableCell className="text-[11px] font-medium text-slate-700 truncate max-w-[150px]">{s.description}</TableCell>
                          <TableCell className="text-[11px] font-black text-right text-slate-900">{s.amount.toLocaleString()}</TableCell>
                          <TableCell className="px-4">
-                           {isMatched ? <CheckCircle className="h-4 w-4 text-blue-500" /> : <AlertCircle className="h-4 w-4 text-amber-500" />}
+                           {isMatched ? <CheckCircle className="h-4 w-4 text-blue-500" /> : <AlertCircle className="h-4 w-4 text-primary" />}
                          </TableCell>
                        </TableRow>
                      );
@@ -1058,16 +1104,13 @@ export function BankReconciliation() {
               <form onSubmit={handleStart} className="space-y-4 py-4">
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-black uppercase text-slate-400">Target Bank Account</Label>
-                  <Select value={newRecon.account_id} onValueChange={v => setNewRecon({...newRecon, account_id: v})}>
-                    <SelectTrigger className="h-11 border-slate-200">
-                      <SelectValue placeholder="Select Account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {accounts.map(acc => (
-                        <SelectItem key={acc.id} value={acc.id.toString()}>{acc.code} - {acc.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Combobox
+                    options={accounts.map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
+                    value={newRecon.account_id ? newRecon.account_id.toString() : ""}
+                    onValueChange={v => setNewRecon({ ...newRecon, account_id: v })}
+                    placeholder="Select Account"
+                    className="h-11 border-slate-200"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-black uppercase text-slate-400">Statement Cut-off Date</Label>
@@ -1076,11 +1119,11 @@ export function BankReconciliation() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-[10px] font-black uppercase text-slate-400">Stmt Ending Balance</Label>
-                    <Input type="number" step="0.01" required value={newRecon.statement_balance} onChange={e => setNewRecon({...newRecon, statement_balance: Number(e.target.value)})} className="h-11 border-slate-200" />
+                    <Input type="number" step="0.01" required value={newRecon.statement_balance} onChange={e => setNewRecon({...newRecon, statement_balance: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value))})} className="h-11 border-slate-200" min="0" />
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-[10px] font-black uppercase text-slate-400">System Balance</Label>
-                    <Input type="number" step="0.01" required value={newRecon.ledger_balance} onChange={e => setNewRecon({...newRecon, ledger_balance: Number(e.target.value)})} className="h-11 border-slate-200" />
+                    <Input type="number" step="0.01" required value={newRecon.ledger_balance} onChange={e => setNewRecon({...newRecon, ledger_balance: e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value))})} className="h-11 border-slate-200" min="0" />
                   </div>
                 </div>
                 <Button type="submit" className="w-full bg-slate-900 h-12 text-xs font-black uppercase tracking-widest">Create Record</Button>
@@ -1107,16 +1150,13 @@ export function BankReconciliation() {
         <div className="flex flex-col md:flex-row items-center gap-6">
            <div className="flex-1 w-full space-y-2">
              <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Select Account to Analyze</Label>
-             <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-               <SelectTrigger className="h-12 border-slate-200 bg-slate-50/50">
-                 <SelectValue placeholder="Begin by choosing a bank account..." />
-               </SelectTrigger>
-               <SelectContent>
-                 {accounts.map(acc => (
-                   <SelectItem key={acc.id} value={acc.id.toString()}>{acc.code} - {acc.name}</SelectItem>
-                 ))}
-               </SelectContent>
-             </Select>
+             <Combobox
+               options={accounts.map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
+               value={selectedAccountId ? selectedAccountId.toString() : ""}
+               onValueChange={setSelectedAccountId}
+               placeholder="Begin by choosing a bank account..."
+               className="h-12 border-slate-200 bg-slate-50/50"
+             />
            </div>
            
            <div className="flex-1 w-full">
@@ -1143,7 +1183,7 @@ export function BankReconciliation() {
                  <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest">PERIOD ENDING</p>
                  <p className="text-xs font-black text-slate-800">{new Date(r.statement_date).toLocaleDateString()}</p>
                </div>
-               <Badge className={`text-[8px] font-black uppercase border-none rounded-sm px-2 py-0.5 ${r.status === 'open' ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'}`}>{r.status}</Badge>
+               <Badge className={`text-[8px] font-black uppercase border-none rounded-sm px-2 py-0.5 ${r.status === 'open' ? 'bg-primary/10 text-primary' : 'bg-blue-100 text-blue-600'}`}>{r.status}</Badge>
             </CardHeader>
             <CardContent className="p-6 space-y-5">
               <div className="flex items-center gap-3">
@@ -1419,26 +1459,26 @@ function AccountAnalytics({ accounts }: { accounts: any[] }) {
   );
 }
 
-// --- BILLS VIEW (PAYABLES) ---
-const BillsView = () => {
+// --- PAYABLES ---
+const PayablesView = () => {
   const [view, setView] = useState<'list' | 'form'>('list');
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   return (
     <div className="space-y-6">
       {view === 'list' ? (
-        <BillsList 
+        <PayablesList 
           onCreate={() => { setSelectedId(null); setView('form'); }} 
           onEdit={(id) => { setSelectedId(id); setView('form'); }} 
         />
       ) : (
-        <BillForm id={selectedId} onBack={() => setView('list')} />
+        <PayableForm id={selectedId} onBack={() => setView('list')} />
       )}
     </div>
   );
 };
 
-const BillsList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (id: number) => void }) => {
+const PayablesList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (id: number) => void }) => {
   const [bills, setBills] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -1448,7 +1488,7 @@ const BillsList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (id: nu
       const data = await res.json();
       setBills(Array.isArray(data) ? data : []);
     } catch (err) {
-      toast.error('Failed to load bills');
+      toast.error('Failed to load payables');
     } finally {
       setLoading(false);
     }
@@ -1457,11 +1497,11 @@ const BillsList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (id: nu
   useEffect(() => { fetchBills(); }, []);
 
   const deleteBill = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this bill?')) return;
+    if (!confirm('Are you sure you want to delete this payable?')) return;
     try {
       const res = await fetch(`/api/bills/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        toast.success('Bill deleted');
+        toast.success('Payable record deleted');
         fetchBills();
       }
     } catch (err) {
@@ -1472,49 +1512,57 @@ const BillsList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (id: nu
   if (loading) return <div className="p-12 text-center animate-pulse text-blue-400 font-mono text-xs uppercase tracking-widest">Syncing Payables Ledger...</div>;
 
   return (
-    <Card className="border-none shadow-sm bg-white overflow-hidden">
-      <CardHeader className="border-b border-blue-50 px-6 py-4 flex flex-row items-center justify-between">
-        <div className="relative w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400" />
-          <Input placeholder="Search bills..." className="pl-9 h-9 text-xs border-blue-100 bg-blue-50/30" />
+    <Card className="border-none shadow-sm bg-white overflow-hidden elegant-card">
+      <CardHeader className="border-b border-blue-50 px-6 py-4 flex flex-row items-center justify-between bg-blue-50/30">
+        <div>
+          <h2 className="text-sm font-black uppercase tracking-widest text-blue-900">AP Registry</h2>
+          <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mt-0.5">Manage vendor payables and accruals</p>
         </div>
-        <Button onClick={onCreate} className="h-9 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest gap-2">
-          <Plus className="h-3.5 w-3.5" /> Book New Bill
-        </Button>
+        <div className="flex gap-4 items-center">
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400" />
+            <Input placeholder="Search payables..." className="pl-9 h-10 text-xs border-blue-100 bg-white rounded-xl" />
+          </div>
+          <Button onClick={onCreate} className="h-10 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest gap-2 rounded-xl shadow-lg shadow-blue-500/20">
+            <Plus className="h-4 w-4" /> Book New Payable
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
-          <TableHeader className="bg-blue-50/50">
-            <TableRow>
-              <TableHead className="px-6 text-[10px] font-black uppercase tracking-widest">Bill #</TableHead>
-              <TableHead className="text-[10px] font-black uppercase tracking-widest">Vendor</TableHead>
-              <TableHead className="text-[10px] font-black uppercase tracking-widest">Date</TableHead>
-              <TableHead className="text-[10px] font-black uppercase tracking-widest text-right">Amount (SAR)</TableHead>
-              <TableHead className="text-center text-[10px] font-black uppercase tracking-widest">Status</TableHead>
-              <TableHead className="px-6 text-right text-[10px] font-black uppercase tracking-widest">Actions</TableHead>
+          <TableHeader className="bg-blue-50/20">
+            <TableRow className="h-12">
+              <TableHead className="px-8 text-[10px] font-black uppercase tracking-widest text-blue-400">Doc #</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400">Vendor / Supplier</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400">Project Link</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400 text-center">Date</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400 text-right">Amount (SAR)</TableHead>
+              <TableHead className="text-center text-[10px] font-black uppercase tracking-widest text-blue-400">Status</TableHead>
+              <TableHead className="px-8 text-right text-[10px] font-black uppercase tracking-widest text-blue-400">Operations</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {bills.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="h-32 text-center text-slate-400 font-mono text-[10px] uppercase tracking-widest">No Open Payables</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="h-48 text-center text-slate-300 font-mono text-[10px] uppercase tracking-widest">No Active Payables found in current cycle</TableCell></TableRow>
             ) : bills.map((bill) => (
-              <TableRow key={bill.id} className="hover:bg-blue-50/30 border-b border-blue-50/50">
-                <TableCell className="px-6 py-4 font-black text-xs text-blue-700">{bill.bill_number}</TableCell>
-                <TableCell className="text-xs font-bold text-slate-700 uppercase">{bill.vendor_name}</TableCell>
-                <TableCell className="text-xs font-semibold text-slate-500">{bill.date}</TableCell>
-                <TableCell className="text-right font-black text-xs text-slate-900">{bill.total_amount.toLocaleString()}.00</TableCell>
+              <TableRow key={bill.id} className="hover:bg-blue-50/30 border-b border-blue-50/50 transition-colors">
+                <TableCell className="px-8 py-5 font-black text-xs text-blue-600">#{bill.bill_number}</TableCell>
+                <TableCell className="text-xs font-black text-blue-950 uppercase tracking-tight">{bill.vendor_name}</TableCell>
+                <TableCell className="text-[10px] font-black text-emerald-600 uppercase tracking-tight">{bill.project_name || '-'}</TableCell>
+                <TableCell className="text-center text-xs font-bold text-slate-500 font-mono">{bill.date}</TableCell>
+                <TableCell className="text-right font-black text-sm text-blue-950 px-8">SAR {bill.total_amount.toLocaleString()}.00</TableCell>
                 <TableCell className="text-center">
-                  <Badge className={`text-[8px] font-black ${bill.status === 'paid' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                  <Badge className={`text-[8px] font-black px-3 py-1 rounded-lg ${bill.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-primary/10 text-primary'}`}>
                     {bill.status.toUpperCase()}
                   </Badge>
                 </TableCell>
-                <TableCell className="px-6 text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => onEdit(bill.id)} className="h-8 w-8 text-blue-600 hover:bg-blue-50">
-                      <Edit className="h-3.5 w-3.5" />
+                <TableCell className="px-8 text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => onEdit(bill.id)} className="h-9 w-9 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full">
+                      <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => deleteBill(bill.id)} className="h-8 w-8 text-red-400 hover:bg-red-50">
-                      <Trash2 className="h-3.5 w-3.5" />
+                    <Button variant="ghost" size="icon" onClick={() => deleteBill(bill.id)} className="h-9 w-9 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full">
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </TableCell>
@@ -1527,27 +1575,38 @@ const BillsList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (id: nu
   );
 };
 
-const BillForm = ({ id, onBack }: { id: number | null, onBack: () => void }) => {
+const PayableForm = ({ id, onBack }: { id: number | null, onBack: () => void }) => {
   const [loading, setLoading] = useState(id ? true : false);
   const [vendors, setVendors] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [formData, setFormData] = useState<any>({
-    bill_number: `BILL-${Date.now().toString().slice(-6)}`,
-    vendor_id: '',
+    bill_number: `AP-${Date.now().toString().slice(-6)}`,
+    supplier_id: '',
+    project_id: '',
     date: new Date().toISOString().split('T')[0],
     due_date: '',
-    total_amount: 0,
-    tax_amount: 0,
+    total_amount: '',
+    tax_amount: '',
     status: 'draft',
+    payment_mode: 'Cash',
+    payment_reference: '',
     notes: '',
-    items: [{ description: '', account_id: '', amount: 0, tax_amount: 0 }]
+    items: [{ description: '', account_id: '', amount: '', tax_amount: '' }]
   });
 
   useEffect(() => {
     const fetchMeta = async () => {
-      const [vRes, aRes] = await Promise.all([fetch('/api/vendors'), fetch('/api/coa')]);
+      const [vRes, aRes, pRes] = await Promise.all([
+        fetch('/api/suppliers'), 
+        fetch('/api/coa'),
+        fetch('/api/projects')
+      ]);
       setVendors(await vRes.json());
-      setAccounts(await aRes.json());
+      const accData = await aRes.json();
+      setAccounts(Array.isArray(accData) ? accData : []);
+      const projData = await pRes.json();
+      setProjects(Array.isArray(projData) ? projData : []);
 
       if (id) {
         const bRes = await fetch(`/api/bills/${id}`);
@@ -1559,7 +1618,7 @@ const BillForm = ({ id, onBack }: { id: number | null, onBack: () => void }) => 
     fetchMeta();
   }, [id]);
 
-  const addItem = () => setFormData({ ...formData, items: [...formData.items, { description: '', account_id: '', amount: 0, tax_amount: 0 }] });
+  const addItem = () => setFormData({ ...formData, items: [...formData.items, { description: '', account_id: '', amount: '', tax_amount: '' }] });
   const removeItem = (idx: number) => setFormData({ ...formData, items: formData.items.filter((_: any, i: number) => i !== idx) });
   const updateItem = (idx: number, key: string, val: any) => {
     const newItems = [...formData.items];
@@ -1578,102 +1637,149 @@ const BillForm = ({ id, onBack }: { id: number | null, onBack: () => void }) => 
         body: JSON.stringify({ ...formData, id })
       });
       if (res.ok) {
-        toast.success('Bill saved');
+        toast.success('Payable synchronized');
         onBack();
       }
     } catch (err) {
-      toast.error('Failed to save bill');
+      toast.error('Financial sync failed');
     }
   };
 
   if (loading) return <div className="p-12 text-center animate-pulse text-blue-400 font-mono text-xs uppercase tracking-widest">Retrieving Document Schema...</div>;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-blue-50">
+    <form onSubmit={handleSubmit} className="max-w-[1030px] mx-auto space-y-6">
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
         <div className="flex items-center gap-4">
-          <Button type="button" variant="ghost" onClick={onBack} size="icon" className="text-blue-400">
-            <ArrowRightLeft className="h-4 w-4 rotate-180" />
+          <Button type="button" variant="ghost" onClick={onBack} size="icon" className="h-10 w-10 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full">
+            <ArrowRightLeft className="h-5 w-5 rotate-180" />
           </Button>
-          <h2 className="text-lg font-black uppercase tracking-tight text-blue-950">{id ? 'Modifying Bill' : 'New Payable Entry'}</h2>
+          <h2 className="text-lg font-black uppercase tracking-tight text-blue-950">{id ? 'Editing Payable Record' : 'Post New Payable Entry'}</h2>
         </div>
-        <div className="flex gap-3">
-          <Button type="button" variant="ghost" onClick={onBack} className="text-[10px] font-black uppercase tracking-widest text-slate-400">Abort</Button>
-          <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest px-8 shadow-lg">Synchronize Ledger</Button>
+        <div className="flex gap-4">
+          <Button type="button" variant="ghost" onClick={onBack} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 px-6 h-11 rounded-xl">Discard</Button>
+          <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest px-8 h-11 rounded-xl shadow-xl shadow-blue-500/20 active:scale-95 transition-all">Commit to GL</Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-1 border-none shadow-sm bg-white p-6 space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Bill Number</label>
-            <Input value={formData.bill_number} onChange={e => setFormData({ ...formData, bill_number: e.target.value })} className="h-9 font-bold text-xs border-blue-100 uppercase" required />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Vendor</label>
-            <Select value={formData.vendor_id?.toString()} onValueChange={v => setFormData({ ...formData, vendor_id: Number(v) })}>
-              <SelectTrigger className="h-9 border-blue-100 bg-white font-bold text-xs uppercase">
-                <SelectValue placeholder="Select Vendor" />
-              </SelectTrigger>
-              <SelectContent>
-                {vendors.map(v => <SelectItem key={v.id} value={v.id.toString()}>{v.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
+      <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden p-8 min-h-[350px] elegant-card rounded-2xl">
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="space-y-1.5">
-              <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Date</label>
-              <Input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="h-9 font-bold text-xs border-blue-100" required />
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Payable Ref #</Label>
+              <Input value={formData.bill_number} onChange={e => setFormData({ ...formData, bill_number: e.target.value })} className="h-10 font-black text-xs border-blue-100 uppercase rounded-xl" required />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Due Date</label>
-              <Input type="date" value={formData.due_date} onChange={e => setFormData({ ...formData, due_date: e.target.value })} className="h-9 font-bold text-xs border-blue-100" />
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Supplier / Vendor</Label>
+              <Combobox
+                options={vendors.map(v => ({ label: v.name, value: v.id.toString() }))}
+                value={(formData.supplier_id || "").toString()}
+                onValueChange={v => setFormData({ ...formData, supplier_id: Number(v) })}
+                placeholder="Select Vendor"
+                className="h-10 border-blue-100 bg-blue-50/30 font-black text-xs uppercase rounded-xl"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Project Link</Label>
+              <Combobox
+                options={[
+                  { label: 'No Project (Global)', value: 'none' },
+                  ...projects.map(p => ({ label: p.name, value: p.id.toString() }))
+                ]}
+                value={(formData.project_id || "none").toString()}
+                onValueChange={v => setFormData({ ...formData, project_id: v === 'none' ? null : Number(v) })}
+                placeholder="Direct Expense"
+                className="h-10 border-blue-100 bg-emerald-50/10 font-bold text-xs uppercase rounded-xl"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Date</Label>
+              <Input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="h-10 font-bold text-[10px] border-blue-100 rounded-xl" required />
             </div>
           </div>
-        </Card>
 
-        <Card className="md:col-span-2 border-none shadow-sm bg-white p-6">
-          <div className="space-y-4">
-            {formData.items.map((item: any, idx: number) => (
-              <div key={idx} className="flex gap-3 items-end pb-4 border-b border-slate-50 last:border-none">
-                <div className="flex-1 space-y-1">
-                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Description</label>
-                  <Input value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} className="h-8 text-xs font-medium border-slate-100" />
-                </div>
-                <div className="w-48 space-y-1">
-                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Account</label>
-                  <Select value={item.account_id?.toString()} onValueChange={v => updateItem(idx, 'account_id', Number(v))}>
-                    <SelectTrigger className="h-8 border-slate-100 text-[10px] font-bold uppercase">
-                      <SelectValue placeholder="Account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {accounts.map(acc => <SelectItem key={acc.id} value={acc.id.toString()}>{acc.code} - {acc.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="w-32 space-y-1">
-                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Amount</label>
-                  <Input type="number" value={item.amount} onChange={e => updateItem(idx, 'amount', e.target.value)} className="h-8 text-xs font-bold border-slate-100" />
-                </div>
-                <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)} className="h-8 w-8 text-slate-300 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></Button>
+          <div className="space-y-4 pt-6 border-t border-slate-50">
+            <div className="flex items-center justify-between mb-2">
+               <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-400">Transaction Breakdown</h3>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="grid grid-cols-12 gap-4 px-2">
+                 <div className="col-span-6 text-[8px] font-black text-slate-400 uppercase tracking-widest">Description of Expense</div>
+                 <div className="col-span-4 text-[8px] font-black text-slate-400 uppercase tracking-widest">GL Account</div>
+                 <div className="col-span-2 text-[8px] font-black text-slate-400 uppercase tracking-widest text-right">Amount (SAR)</div>
               </div>
-            ))}
-            <Button type="button" variant="outline" size="sm" onClick={addItem} className="h-7 text-[9px] font-black uppercase text-blue-600 border-blue-100">+ Add line</Button>
-          </div>
-
-          <div className="mt-8 pt-6 border-t border-blue-50 flex justify-end">
-            <div className="w-48 text-right space-y-2">
-              <p className="text-[10px] font-black uppercase text-blue-600/60 tracking-widest">Invoice Total</p>
-              <p className="text-2xl font-black text-blue-950">SAR {formData.total_amount.toLocaleString()}.00</p>
+              {formData.items.map((item: any, idx: number) => (
+                <div key={idx} className="grid grid-cols-12 gap-4 items-center group animate-in fade-in slide-in-from-left-2 transition-all">
+                  <div className="col-span-6">
+                    <Input 
+                      size="sm"
+                      value={item.description} 
+                      onChange={(e) => updateItem(idx, 'description', e.target.value)} 
+                      placeholder="Line item detail..." 
+                      className="h-10 font-bold text-xs" 
+                    />
+                  </div>
+                  <div className="col-span-4">
+                    <Combobox
+                      options={accounts.map(acc => ({ label: `${acc.code} - ${acc.name}`, value: acc.id.toString() }))}
+                      value={(item.account_id || "").toString()}
+                      onValueChange={v => updateItem(idx, 'account_id', v)}
+                      placeholder="Select Account"
+                      className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Input type="number" size="sm" value={item.amount} onChange={e => updateItem(idx, 'amount', e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))} className="h-10 text-right font-black font-mono text-xs" min="0" />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        </Card>
-      </div>
+
+          <div className="flex justify-between items-end pt-6 border-t border-slate-50">
+            <div className="space-y-4 max-w-sm">
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                        <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Payment Mode</Label>
+                        <Combobox
+                          options={[
+                            { label: 'Cash', value: 'Cash' },
+                            { label: 'Bank Transfer', value: 'Bank Transfer' },
+                            { label: 'Cheque', value: 'Cheque' }
+                          ]}
+                          value={formData.payment_mode || "Cash"}
+                          onValueChange={v => setFormData({ ...formData, payment_mode: v })}
+                          placeholder="Mode"
+                          className="h-10 border-blue-100 font-bold text-xs rounded-xl"
+                        />
+                    </div>
+                    {['Bank Transfer', 'Cheque'].includes(formData.payment_mode) && (
+                        <div className="space-y-1.5">
+                            <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Ref #</Label>
+                            <Input 
+                                value={formData.payment_reference || ''} 
+                                onChange={e => setFormData({ ...formData, payment_reference: e.target.value })} 
+                                className="h-10 font-bold text-xs border-blue-100 rounded-xl" 
+                                placeholder="Ref..."
+                            />
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-black uppercase text-blue-600/40 tracking-[0.2em] mb-1">Total Liability</p>
+              <p className="text-4xl font-black text-blue-950 tracking-tighter">SAR {formData.total_amount.toLocaleString()}.00</p>
+            </div>
+          </div>
+        </div>
+      </Card>
     </form>
+
   );
 };
 
-// --- RECEIVABLES VIEW (INVOICES) ---
+// --- RECEIVABLES ---
 const ReceivablesView = () => {
   const [view, setView] = useState<'list' | 'form'>('list');
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -1715,7 +1821,7 @@ const ReceivablesList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (
     try {
       const res = await fetch(`/api/invoices/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        toast.success('Invoice deleted');
+        toast.success('Receivable invoice record deleted');
         fetchInvoices();
       }
     } catch (err) {
@@ -1726,49 +1832,57 @@ const ReceivablesList = ({ onCreate, onEdit }: { onCreate: () => void, onEdit: (
   if (loading) return <div className="p-12 text-center animate-pulse text-blue-400 font-mono text-xs uppercase tracking-widest">Compiling Receivables Matrix...</div>;
 
   return (
-    <Card className="border-none shadow-sm bg-white overflow-hidden">
-      <CardHeader className="border-b border-blue-50 px-6 py-4 flex flex-row items-center justify-between">
-        <div className="relative w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400" />
-          <Input placeholder="Search receivables..." className="pl-9 h-9 text-xs border-blue-100 bg-blue-50/30" />
+    <Card className="border-none shadow-sm bg-white overflow-hidden elegant-card">
+      <CardHeader className="border-b border-blue-50 px-6 py-4 flex flex-row items-center justify-between bg-blue-50/30">
+        <div>
+          <h2 className="text-sm font-black uppercase tracking-widest text-blue-900">AR Registry</h2>
+          <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mt-0.5">Track customer billings and collections</p>
         </div>
-        <Button onClick={onCreate} className="h-9 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest gap-2">
-          <Plus className="h-3.5 w-3.5" /> Issue New Invoice
-        </Button>
+        <div className="flex gap-4 items-center">
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-blue-400" />
+            <Input placeholder="Search invoices..." className="pl-9 h-10 text-xs border-blue-100 bg-white rounded-xl" />
+          </div>
+          <Button onClick={onCreate} className="h-10 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest gap-2 rounded-xl shadow-lg shadow-blue-500/20">
+            <Plus className="h-4 w-4" /> Issue New Invoice
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
-          <TableHeader className="bg-blue-50/50">
-            <TableRow>
-              <TableHead className="px-6 text-[10px] font-black uppercase tracking-widest">Inv #</TableHead>
-              <TableHead className="text-[10px] font-black uppercase tracking-widest">Customer</TableHead>
-              <TableHead className="text-[10px] font-black uppercase tracking-widest">Date</TableHead>
-              <TableHead className="text-[10px] font-black uppercase tracking-widest text-right">Amount (SAR)</TableHead>
-              <TableHead className="text-center text-[10px] font-black uppercase tracking-widest">Status</TableHead>
-              <TableHead className="px-6 text-right text-[10px] font-black uppercase tracking-widest">Actions</TableHead>
+          <TableHeader className="bg-blue-50/20">
+            <TableRow className="h-12">
+              <TableHead className="px-8 text-[10px] font-black uppercase tracking-widest text-blue-400">Inv #</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400">Customer</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400">Project Link</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400 text-center">Date</TableHead>
+              <TableHead className="text-[10px] font-black uppercase tracking-widest text-blue-400 text-right">Amount (SAR)</TableHead>
+              <TableHead className="text-center text-[10px] font-black uppercase tracking-widest text-blue-400">Status</TableHead>
+              <TableHead className="px-8 text-right text-[10px] font-black uppercase tracking-widest text-blue-400">Operations</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {invoices.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="h-32 text-center text-slate-400 font-mono text-[10px] uppercase tracking-widest">No Active Receivables</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="h-48 text-center text-slate-300 font-mono text-[10px] uppercase tracking-widest">No Active Receivables found in current ledger</TableCell></TableRow>
             ) : invoices.map((inv) => (
-              <TableRow key={inv.id} className="hover:bg-blue-50/30 border-b border-blue-50/50">
-                <TableCell className="px-6 py-4 font-black text-xs text-blue-700">{inv.invoice_number}</TableCell>
-                <TableCell className="text-xs font-bold text-slate-700 uppercase">{inv.customer_name}</TableCell>
-                <TableCell className="text-xs font-semibold text-slate-500">{inv.date}</TableCell>
-                <TableCell className="text-right font-black text-xs text-slate-900">{inv.total_amount.toLocaleString()}.00</TableCell>
+              <TableRow key={inv.id} className="hover:bg-blue-50/30 border-b border-blue-50/50 transition-colors">
+                <TableCell className="px-8 py-5 font-black text-xs text-blue-700">{inv.invoice_number}</TableCell>
+                <TableCell className="text-xs font-black text-blue-950 uppercase tracking-tight">{inv.customer_name}</TableCell>
+                <TableCell className="text-[10px] font-black text-emerald-600 uppercase tracking-tight">{inv.project_name || '-'}</TableCell>
+                <TableCell className="text-center text-xs font-bold text-slate-500 font-mono">{inv.date}</TableCell>
+                <TableCell className="text-right font-black text-sm text-blue-950 px-8">SAR {inv.total_amount.toLocaleString()}.00</TableCell>
                 <TableCell className="text-center">
-                  <Badge className={`text-[8px] font-black ${inv.status === 'paid' ? 'bg-blue-100 text-blue-700' : 'bg-blue-200 text-blue-800'}`}>
+                  <Badge className={`text-[8px] font-black px-3 py-1 rounded-lg ${inv.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
                     {inv.status.toUpperCase()}
                   </Badge>
                 </TableCell>
-                <TableCell className="px-6 text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => onEdit(inv.id)} className="h-8 w-8 text-blue-600 hover:bg-blue-50">
-                      <Edit className="h-3.5 w-3.5" />
+                <TableCell className="px-8 text-right">
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => onEdit(inv.id)} className="h-9 w-9 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full">
+                      <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => deleteInvoice(inv.id)} className="h-8 w-8 text-red-400 hover:bg-red-50">
-                      <Trash2 className="h-3.5 w-3.5" />
+                    <Button variant="ghost" size="icon" onClick={() => deleteInvoice(inv.id)} className="h-9 w-9 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full">
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </TableCell>
@@ -1785,23 +1899,34 @@ const ReceivablesForm = ({ id, onBack }: { id: number | null, onBack: () => void
   const [loading, setLoading] = useState(id ? true : false);
   const [customers, setCustomers] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [formData, setFormData] = useState<any>({
     invoice_number: `INV-${Date.now().toString().slice(-6)}`,
     customer_id: '',
+    project_id: '',
     date: new Date().toISOString().split('T')[0],
     due_date: '',
-    total_amount: 0,
-    tax_amount: 0,
+    total_amount: '',
+    tax_amount: '',
     status: 'draft',
+    payment_mode: 'Cash',
+    payment_reference: '',
     notes: '',
-    items: [{ description: '', account_id: '', amount: 0, tax_amount: 0 }]
+    items: [{ description: '', account_id: '', amount: '', tax_amount: '' }]
   });
 
   useEffect(() => {
     const fetchMeta = async () => {
-      const [cRes, aRes] = await Promise.all([fetch('/api/customers'), fetch('/api/coa')]);
+      const [cRes, aRes, pRes] = await Promise.all([
+        fetch('/api/customers'), 
+        fetch('/api/coa'),
+        fetch('/api/projects')
+      ]);
       setCustomers(await cRes.json());
-      setAccounts(await aRes.json());
+      const accData = await aRes.json();
+      setAccounts(Array.isArray(accData) ? accData : []);
+      const projData = await pRes.json();
+      setProjects(Array.isArray(projData) ? projData : []);
 
       if (id) {
         const iRes = await fetch(`/api/invoices/${id}`);
@@ -1813,7 +1938,7 @@ const ReceivablesForm = ({ id, onBack }: { id: number | null, onBack: () => void
     fetchMeta();
   }, [id]);
 
-  const addItem = () => setFormData({ ...formData, items: [...formData.items, { description: '', account_id: '', amount: 0, tax_amount: 0 }] });
+  const addItem = () => setFormData({ ...formData, items: [...formData.items, { description: '', account_id: '', amount: '', tax_amount: '' }] });
   const removeItem = (idx: number) => setFormData({ ...formData, items: formData.items.filter((_: any, i: number) => i !== idx) });
   const updateItem = (idx: number, key: string, val: any) => {
     const newItems = [...formData.items];
@@ -1832,109 +1957,158 @@ const ReceivablesForm = ({ id, onBack }: { id: number | null, onBack: () => void
         body: JSON.stringify({ ...formData, id })
       });
       if (res.ok) {
-        toast.success('Invoice saved');
+        toast.success('Receivable invoice synchronized');
         onBack();
       }
     } catch (err) {
-      toast.error('Failed to save invoice');
+      toast.error('Financial sync failed');
     }
   };
 
   if (loading) return <div className="p-12 text-center animate-pulse text-blue-400 font-mono text-xs uppercase tracking-widest">Hydrating Financial Record...</div>;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-blue-50">
+    <form onSubmit={handleSubmit} className="max-w-[1030px] mx-auto space-y-6">
+      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
         <div className="flex items-center gap-4">
-          <Button type="button" variant="ghost" onClick={onBack} size="icon" className="text-blue-400">
-            <ArrowRightLeft className="h-4 w-4 rotate-180" />
+          <Button type="button" variant="ghost" onClick={onBack} size="icon" className="h-10 w-10 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded-full">
+            <ArrowRightLeft className="h-5 w-5 rotate-180" />
           </Button>
-          <h2 className="text-lg font-black uppercase tracking-tight text-slate-900">{id ? 'Editing Invoice' : 'Issue Professional Invoice'}</h2>
+          <h2 className="text-lg font-black uppercase tracking-tight text-blue-950">{id ? 'Editing Professional Invoice' : 'Issue Professional Invoice'}</h2>
         </div>
-        <div className="flex gap-3">
-          <Button type="button" variant="ghost" onClick={onBack} className="text-[10px] font-black uppercase tracking-widest text-slate-400">Abort</Button>
-          <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest px-8 shadow-lg">Finalize & Issue</Button>
+        <div className="flex gap-4">
+          <Button type="button" variant="ghost" onClick={onBack} className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 px-6 h-11 rounded-xl">Discard</Button>
+          <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-widest px-8 h-11 rounded-xl shadow-xl shadow-blue-500/20 active:scale-95 transition-all">Finalize & Issue</Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-1 border-none shadow-sm bg-white p-6 space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Invoice Number</label>
-            <Input value={formData.invoice_number} onChange={e => setFormData({ ...formData, invoice_number: e.target.value })} className="h-9 font-bold text-xs border-blue-100 uppercase" required />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Customer</label>
-            <Select value={formData.customer_id?.toString()} onValueChange={v => setFormData({ ...formData, customer_id: Number(v) })}>
-              <SelectTrigger className="h-9 border-blue-100 bg-white font-bold text-xs uppercase">
-                <SelectValue placeholder="Select Customer" />
-              </SelectTrigger>
-              <SelectContent>
-                {customers.map(c => <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
+      <Card className="border border-slate-200 shadow-sm bg-white overflow-hidden p-8 min-h-[350px] elegant-card rounded-2xl">
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="space-y-1.5">
-              <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Date</label>
-              <Input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="h-9 font-bold text-xs border-blue-100" required />
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Invoice Ref #</Label>
+              <Input value={formData.invoice_number} onChange={e => setFormData({ ...formData, invoice_number: e.target.value })} className="h-10 font-black text-xs border-blue-100 uppercase rounded-xl" required />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[9px] font-black text-blue-600/60 uppercase tracking-widest">Due Date</label>
-              <Input type="date" value={formData.due_date} onChange={e => setFormData({ ...formData, due_date: e.target.value })} className="h-9 font-bold text-xs border-blue-100" />
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Purchasing Customer</Label>
+              <Combobox
+                options={customers.map(c => ({ label: c.name, value: c.id.toString() }))}
+                value={(formData.customer_id || "").toString()}
+                onValueChange={v => setFormData({ ...formData, customer_id: Number(v) })}
+                placeholder="Select Customer"
+                className="h-10 border-blue-100 bg-blue-50/30 font-black text-xs uppercase rounded-xl"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Associated Project</Label>
+              <Combobox
+                options={[
+                  { label: 'General Trading / Services', value: 'none' },
+                  ...projects.map(p => ({ label: p.name, value: p.id.toString() }))
+                ]}
+                value={(formData.project_id || "none").toString()}
+                onValueChange={v => setFormData({ ...formData, project_id: v === 'none' ? null : Number(v) })}
+                placeholder="Non-Project Revenue"
+                className="h-10 border-blue-100 bg-emerald-50/10 font-bold text-xs uppercase rounded-xl"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Issue Date</Label>
+              <Input type="date" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="h-10 font-bold text-[10px] border-blue-100 rounded-xl" required />
             </div>
           </div>
-        </Card>
 
-        <Card className="md:col-span-2 border-none shadow-sm bg-white p-6">
-          <div className="space-y-4">
-            {formData.items.map((item: any, idx: number) => (
-              <div key={idx} className="flex gap-3 items-end pb-4 border-b border-slate-50 last:border-none">
-                <div className="flex-1 space-y-1">
-                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Description</label>
-                  <Input value={item.description} onChange={e => updateItem(idx, 'description', e.target.value)} className="h-8 text-xs font-medium border-slate-100" />
-                </div>
-                <div className="w-48 space-y-1">
-                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Account</label>
-                  <Select value={item.account_id?.toString()} onValueChange={v => updateItem(idx, 'account_id', Number(v))}>
-                    <SelectTrigger className="h-8 border-slate-100 text-[10px] font-bold uppercase">
-                      <SelectValue placeholder="Account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {accounts.map(acc => <SelectItem key={acc.id} value={acc.id.toString()}>{acc.code} - {acc.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="w-32 space-y-1">
-                  <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Amount</label>
-                  <Input type="number" value={item.amount} onChange={e => updateItem(idx, 'amount', e.target.value)} className="h-8 text-xs font-bold border-slate-100" />
-                </div>
-                <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)} className="h-8 w-8 text-slate-300 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></Button>
+          <div className="space-y-4 pt-6 border-t border-slate-50">
+            <div className="flex items-center justify-between mb-2">
+               <h3 className="text-[10px] font-black uppercase tracking-widest text-blue-400">Billable Services / Revenue Entry</h3>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="grid grid-cols-12 gap-4 px-2">
+                 <div className="col-span-6 text-[8px] font-black text-slate-400 uppercase tracking-widest">Service Description</div>
+                 <div className="col-span-4 text-[8px] font-black text-slate-400 uppercase tracking-widest">Revenue Account</div>
+                 <div className="col-span-2 text-[8px] font-black text-slate-400 uppercase tracking-widest text-right">Amount (SAR)</div>
               </div>
-            ))}
-            <Button type="button" variant="outline" size="sm" onClick={addItem} className="h-7 text-[9px] font-black uppercase text-blue-600 border-blue-100">+ Add line</Button>
-          </div>
-
-          <div className="mt-8 pt-6 border-t border-blue-50 flex justify-end">
-            <div className="w-48 text-right space-y-2">
-              <p className="text-[10px] font-black uppercase text-blue-600/60 tracking-widest">Total Amount</p>
-              <p className="text-2xl font-black text-slate-900">SAR {formData.total_amount.toLocaleString()}.00</p>
+              {formData.items.map((item: any, idx: number) => (
+                <div key={idx} className="grid grid-cols-12 gap-4 items-center group animate-in fade-in slide-in-from-left-2 transition-all">
+                  <div className="col-span-6">
+                    <Input 
+                      size="sm"
+                      value={item.description} 
+                      onChange={(e) => updateItem(idx, 'description', e.target.value)} 
+                      placeholder="Billed item detail..." 
+                      className="h-10 font-bold text-xs" 
+                    />
+                  </div>
+                  <div className="col-span-4">
+                    <Combobox
+                      options={accounts.map(acc => ({ label: `${acc.code} - ${acc.name}`, value: acc.id.toString() }))}
+                      value={(item.account_id || "").toString()}
+                      onValueChange={v => updateItem(idx, 'account_id', v)}
+                      placeholder="Select Account"
+                      className="h-10 border-slate-200 text-[10px] font-black uppercase rounded-xl bg-white"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Input type="number" size="sm" value={item.amount} onChange={e => updateItem(idx, 'amount', e.target.value === '' ? '' : Math.max(0, parseFloat(e.target.value)))} className="h-10 text-right font-black font-mono text-xs" min="0" />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        </Card>
-      </div>
+
+          <div className="flex justify-between items-end pt-6 border-t border-slate-50">
+            <div className="space-y-4 max-w-sm">
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                        <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Payment Method</Label>
+                        <Combobox
+                          options={[
+                            { label: 'Cash', value: 'Cash' },
+                            { label: 'Bank Transfer', value: 'Bank Transfer' },
+                            { label: 'Cheque', value: 'Cheque' }
+                          ]}
+                          value={formData.payment_mode || "Cash"}
+                          onValueChange={v => setFormData({ ...formData, payment_mode: v })}
+                          placeholder="Mode"
+                          className="h-10 border-blue-100 font-bold text-xs rounded-xl"
+                        />
+                    </div>
+                    {['Bank Transfer', 'Cheque'].includes(formData.payment_mode) && (
+                        <div className="space-y-1.5">
+                            <Label className="text-[10px] font-black text-blue-600/60 uppercase tracking-widest px-1">Auth Ref #</Label>
+                            <Input 
+                                value={formData.payment_reference || ''} 
+                                onChange={e => setFormData({ ...formData, payment_reference: e.target.value })} 
+                                className="h-10 font-bold text-xs border-blue-100 rounded-xl" 
+                                placeholder="Ref..."
+                            />
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-black uppercase text-blue-600/40 tracking-[0.2em] mb-1">Incoming Revenue</p>
+              <p className="text-4xl font-black text-blue-950 tracking-tighter">SAR {formData.total_amount.toLocaleString()}.00</p>
+            </div>
+          </div>
+        </div>
+      </Card>
     </form>
+
   );
 };
 
 const SUB_MODULE_MAPPING: Record<string, string> = {
   'Invoices': 'invoices',
   'Chart of Accounts': 'coa',
+  'Ledger': 'ledger',
   'Journal Entries': 'journals',
-  'Payables (Bills)': 'payables',
-  'Receivables (Invoices)': 'receivables',
+  'Payables': 'payables',
+  'Receivables': 'receivables',
   'Bank Reconciliation': 'reconciliation',
-  'Account Analytics': 'analytics'
+  'Account Analytics': 'analytics',
+  'Financial Tracking': 'financial-tracking'
 };
 
 export default function AccountingModule({ subModule, initialParams }: { subModule?: string, initialParams?: any }) {
@@ -1987,10 +2161,14 @@ export default function AccountingModule({ subModule, initialParams }: { subModu
             <LayoutDashboard className="h-3.5 w-3.5" /> Dashboard
           </TabsTrigger>
           <TabsTrigger value="coa" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all">List</TabsTrigger>
+          <TabsTrigger value="ledger" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all">Ledger</TabsTrigger>
           <TabsTrigger value="analytics" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all">Analytics</TabsTrigger>
           <TabsTrigger value="invoices" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all">Old Invoices</TabsTrigger>
           <TabsTrigger value="payables" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-nowrap">Payables</TabsTrigger>
           <TabsTrigger value="receivables" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-nowrap">Receivables</TabsTrigger>
+          <TabsTrigger value="financial-tracking" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-nowrap gap-2">
+            <Activity className="h-3.5 w-3.5" /> Financial Tracking
+          </TabsTrigger>
           <TabsTrigger value="journals" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-nowrap">Journal Entries</TabsTrigger>
           <TabsTrigger value="reconciliation" className="text-[10px] font-black uppercase tracking-widest px-6 h-9 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-nowrap">Bank Recon</TabsTrigger>
         </TabsList>
@@ -2010,14 +2188,20 @@ export default function AccountingModule({ subModule, initialParams }: { subModu
         <TabsContent value="coa" className="mt-8 transition-all focus-visible:outline-none focus:outline-none">
           <ChartOfAccounts />
         </TabsContent>
+        <TabsContent value="ledger" className="mt-8 transition-all focus-visible:outline-none focus:outline-none">
+          <LedgerManager accounts={accounts} />
+        </TabsContent>
         <TabsContent value="invoices" className="mt-8 transition-all focus-visible:outline-none focus:outline-none">
           <InvoicesView />
         </TabsContent>
         <TabsContent value="payables" className="mt-8 transition-all focus-visible:outline-none focus:outline-none">
-          <BillsView />
+          <PayablesView />
         </TabsContent>
         <TabsContent value="receivables" className="mt-8 transition-all focus-visible:outline-none focus:outline-none">
           <ReceivablesView />
+        </TabsContent>
+        <TabsContent value="financial-tracking" className="mt-8 transition-all focus-visible:outline-none focus:outline-none">
+          <FinancialTracking />
         </TabsContent>
         <TabsContent value="journals" className="mt-8 transition-all focus-visible:outline-none focus:outline-none">
           <JournalEntries />

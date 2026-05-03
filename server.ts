@@ -16,6 +16,12 @@ const __dirname = path.dirname(__filename);
 const JWT_SECRET = process.env.JWT_SECRET || 'itqan-secret-key-123';
 const db = new Database('accounting.db');
 
+const parseAccountId = (val: any) => {
+  if (val === undefined || val === null || val === '') return null;
+  if (typeof val === 'string' && val.includes('|')) return parseInt(val.split('|')[0], 10);
+  return Number(val);
+};
+
 // --- DATABASE INITIALIZATION ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -162,6 +168,11 @@ db.exec(`
     FOREIGN KEY (sales_order_id) REFERENCES sales_orders(id)
   );
 
+  CREATE TABLE IF NOT EXISTS units (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS bills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     bill_number TEXT UNIQUE NOT NULL,
@@ -195,7 +206,21 @@ db.exec(`
     qty_on_hand REAL DEFAULT 0,
     min_qty REAL DEFAULT 0,
     cost_price REAL DEFAULT 0,
-    sale_price REAL DEFAULT 0
+    sale_price REAL DEFAULT 0,
+    project_id INTEGER,
+    location_type TEXT DEFAULT 'company', -- 'company' or 'project'
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS project_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    description TEXT,
+    reference TEXT,
+    amount REAL NOT NULL, -- Positive for revenue/budget, negative for expense
+    type TEXT NOT NULL, -- revenue, expense
+    FOREIGN KEY (project_id) REFERENCES projects(id)
   );
 
   CREATE TABLE IF NOT EXISTS company_details (
@@ -223,12 +248,44 @@ db.exec(`
     FOREIGN KEY (item_id) REFERENCES inventory_items(id)
   );
 
+  CREATE TABLE IF NOT EXISTS bill_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bill_id INTEGER NOT NULL,
+    account_id INTEGER,
+    inventory_item_id INTEGER,
+    description TEXT,
+    qty REAL DEFAULT 0,
+    amount REAL DEFAULT 0,
+    tax_amount REAL DEFAULT 0,
+    FOREIGN KEY (bill_id) REFERENCES bills(id),
+    FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id),
+    FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS invoice_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL,
+    account_id INTEGER,
+    description TEXT,
+    amount REAL DEFAULT 0,
+    tax_amount REAL DEFAULT 0,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id),
+    FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id)
+  );
+
   CREATE TABLE IF NOT EXISTS chart_of_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
     type TEXT NOT NULL, -- Asset, Liability, Equity, Revenue, Expense
     is_active INTEGER DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS ledgers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    account_id INTEGER NOT NULL,
+    FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id)
   );
 
   CREATE TABLE IF NOT EXISTS project_categories (
@@ -246,6 +303,36 @@ db.exec(`
     FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id)
   );
 `);
+
+  // Migrations for new columns
+  try {
+    db.exec(`
+      ALTER TABLE bills ADD COLUMN payment_mode TEXT;
+      ALTER TABLE bills ADD COLUMN payment_reference TEXT;
+    `);
+  } catch (e) {}
+
+  try {
+    db.exec(`
+      ALTER TABLE invoices ADD COLUMN payment_mode TEXT;
+      ALTER TABLE invoices ADD COLUMN payment_reference TEXT;
+    `);
+  } catch (e) {}
+
+  try {
+    db.exec(`
+      ALTER TABLE inventory_items ADD COLUMN project_id INTEGER;
+      ALTER TABLE inventory_items ADD COLUMN location_type TEXT DEFAULT 'company';
+    `);
+  } catch (e) {}
+
+  try {
+    db.exec(`
+      ALTER TABLE bill_items ADD COLUMN inventory_item_id INTEGER;
+      ALTER TABLE bill_items ADD COLUMN qty REAL DEFAULT 0;
+    `);
+  } catch (e) {}
+
 
   // Seed Project Categories
   const catCount = db.prepare('SELECT count(*) as count FROM project_categories').get() as { count: number };
@@ -271,6 +358,16 @@ db.exec(`
     const insertCat = db.prepare('INSERT INTO project_categories (name) VALUES (?)');
     defaultCats.forEach(cat => {
       try { insertCat.run(cat); } catch(e) {}
+    });
+  }
+
+  // Seed Units
+  const unitCount = db.prepare('SELECT count(*) as count FROM units').get() as { count: number };
+  if (unitCount.count === 0) {
+    const defaultUnits = ['Lot', 'Item', 'm2', 'm3', 'kg', 'unit', 'LS', 'job'];
+    const insertUnit = db.prepare('INSERT INTO units (name) VALUES (?)');
+    defaultUnits.forEach(unit => {
+      try { insertUnit.run(unit); } catch(e) {}
     });
   }
 
@@ -371,6 +468,20 @@ try {
   // Column likely already exists
 }
 
+// Migration: Add newly needed fields to bills and bill_items
+try {
+  db.exec('ALTER TABLE bills ADD COLUMN supplier_invoice_no TEXT');
+  db.exec('ALTER TABLE bills ADD COLUMN supplier_invoice_date TEXT');
+} catch (e) {
+  // Columns likely already exist
+}
+try {
+  db.exec('ALTER TABLE bill_items ADD COLUMN unit_price REAL');
+  db.exec('ALTER TABLE bill_items ADD COLUMN discount REAL DEFAULT 0');
+} catch (e) {
+  // Columns likely already exist
+}
+
 // Migration: Add created_at to users if not exists
 try {
   db.exec('ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP');
@@ -383,9 +494,20 @@ try {
   db.exec('ALTER TABLE quotation_items ADD COLUMN sub_category TEXT');
 } catch (e) {}
 
-// Migration: Add sub_category to sales_order_items if not exists
+// Migration: Add project_id to invoices if not exists
 try {
-  db.exec('ALTER TABLE sales_order_items ADD COLUMN sub_category TEXT');
+  db.exec('ALTER TABLE invoices ADD COLUMN project_id INTEGER');
+} catch (e) {}
+
+// Migration: Add description to sales_orders if not exists
+try {
+  db.exec('ALTER TABLE sales_orders ADD COLUMN description TEXT');
+} catch (e) {}
+
+// Migration: Add item_id to quote/so items if missing (not strictly needed but good for inventory linkage)
+try {
+  db.exec('ALTER TABLE quotation_items ADD COLUMN item_id INTEGER');
+  db.exec('ALTER TABLE sales_order_items ADD COLUMN item_id INTEGER');
 } catch (e) {}
 
 // Migration: Remove UNIQUE constraint from quotation_number and add parent_id
@@ -427,6 +549,26 @@ try {
 } catch (e) {
   console.error("Migration error:", e);
 }
+
+try {
+  const quoteCols = db.prepare("PRAGMA table_info(quotations)").all() as any[];
+  if (!quoteCols.some(col => col.name === 'description')) {
+    db.exec("ALTER TABLE quotations ADD COLUMN description TEXT");
+  }
+  if (!quoteCols.some(col => col.name === 'terms_and_conditions')) {
+    db.exec("ALTER TABLE quotations ADD COLUMN terms_and_conditions TEXT");
+  }
+  if (!quoteCols.some(col => col.name === 'notes_json')) {
+    db.exec("ALTER TABLE quotations ADD COLUMN notes_json TEXT");
+  }
+} catch(e) {}
+
+try {
+  const soCols = db.prepare("PRAGMA table_info(sales_orders)").all() as any[];
+  if (!soCols.some(col => col.name === 'description')) {
+    db.exec("ALTER TABLE sales_orders ADD COLUMN description TEXT");
+  }
+} catch(e) {}
 
 // Seed Initial Data for Demo
 const customerCount = db.prepare('SELECT count(*) as count FROM customers').get() as { count: number };
@@ -620,8 +762,23 @@ async function startServer() {
       const quotation = db.prepare('SELECT * FROM quotations WHERE id = ? OR quotation_number = ?').get(id, id) as any;
       if (!quotation) return res.status(404).json({ error: 'Quotation not found' });
       
-      const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY id ASC').all();
-      res.json({ ...quotation, items });
+      const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY id ASC').all(quotation.id);
+      
+      // Fetch previous revision for comparison if applicable
+      let previousItems = null;
+      if (quotation.parent_id) {
+        const prevRev = db.prepare(`
+          SELECT * FROM quotations 
+          WHERE parent_id = ? AND id < ? 
+          ORDER BY id DESC LIMIT 1
+        `).get(quotation.parent_id, quotation.id) as any;
+
+        if (prevRev) {
+          previousItems = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY id ASC').all(prevRev.id);
+        }
+      }
+
+      res.json({ ...quotation, items, previousItems });
     } catch (err: any) {
       res.status(500).json({ error: 'Database error', details: err.message });
     }
@@ -722,14 +879,66 @@ async function startServer() {
   app.get('/api/invoices', authenticate, (req, res) => {
     try {
       const invoices = db.prepare(`
-        SELECT i.*, c.name as customer_name 
+        SELECT i.*, c.name as customer_name, p.name as project_name
         FROM invoices i 
         LEFT JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN projects p ON i.project_id = p.id
         ORDER BY i.date DESC
       `).all();
       res.json(invoices);
     } catch (err: any) {
       res.status(500).json({ error: 'Database error fetching invoices', details: err.message });
+    }
+  });
+
+  app.post('/api/invoices/save', authenticate, (req, res) => {
+    try {
+      const { id, invoice_number, customer_id, project_id, date, due_date, total_amount, tax_amount, status, notes, items, payment_mode, payment_reference } = req.body;
+      
+      const transaction = db.transaction(() => {
+        let invoiceId = id;
+        if (id) {
+          db.prepare(`
+            UPDATE invoices 
+            SET invoice_number = ?, customer_id = ?, project_id = ?, date = ?, due_date = ?, total_amount = ?, vat_amount = ?, status = ?, payment_mode = ?, payment_reference = ?
+            WHERE id = ?
+          `).run(invoice_number, customer_id, project_id, date, due_date, total_amount, tax_amount, status || 'pending', payment_mode || null, payment_reference || null, id);
+          
+          db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(id);
+        } else {
+          const info = db.prepare(`
+            INSERT INTO invoices (invoice_number, customer_id, project_id, date, due_date, total_amount, vat_amount, status, payment_mode, payment_reference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(invoice_number, customer_id, project_id, date, due_date, total_amount, tax_amount, status || 'pending', payment_mode || null, payment_reference || null);
+          invoiceId = info.lastInsertRowid;
+        }
+
+        if (items && Array.isArray(items)) {
+          const insertItem = db.prepare(`
+            INSERT INTO invoice_items (invoice_id, account_id, description, amount, tax_amount)
+            VALUES (?, ?, ?, ?, ?)
+          `);
+          for (const item of items) {
+            insertItem.run(invoiceId, parseAccountId(item.account_id), item.description, item.amount, item.tax_amount);
+          }
+        }
+
+        // Handle project ledger integration if project_id is provided
+        if (project_id) {
+            db.prepare(`
+                INSERT INTO project_ledger (project_id, date, description, reference, amount, type)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `).run(project_id, date, `Invoice: ${invoice_number}`, invoice_number, total_amount, 'revenue');
+        }
+
+        return invoiceId;
+      });
+
+      const finalId = transaction();
+      res.json({ id: finalId, message: 'Invoice saved successfully' });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to save invoice', details: err.message });
     }
   });
 
@@ -741,9 +950,11 @@ async function startServer() {
         FROM invoices i 
         LEFT JOIN customers c ON i.customer_id = c.id
         WHERE i.id = ?
-      `).get(id);
+      `).get(id) as any;
       if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-      res.json(invoice);
+      
+      const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id);
+      res.json({ ...invoice, items });
     } catch (err: any) {
       res.status(500).json({ error: 'Database error', details: err.message });
     }
@@ -751,11 +962,11 @@ async function startServer() {
 
   app.post('/api/invoices', authenticate, (req, res) => {
     try {
-      const { invoice_number, customer_id, date, due_date, total_amount, vat_amount } = req.body;
+      const { invoice_number, customer_id, date, due_date, total_amount, vat_amount, payment_mode, payment_reference } = req.body;
       const info = db.prepare(`
-        INSERT INTO invoices (invoice_number, customer_id, date, due_date, total_amount, vat_amount)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(invoice_number, customer_id, date, due_date, total_amount, vat_amount);
+        INSERT INTO invoices (invoice_number, customer_id, date, due_date, total_amount, vat_amount, payment_mode, payment_reference)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(invoice_number, customer_id, date, due_date, total_amount, vat_amount, payment_mode || 'Cash', payment_reference || '');
       res.json({ id: info.lastInsertRowid });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create invoice', details: err.message });
@@ -765,12 +976,12 @@ async function startServer() {
   app.put('/api/invoices/:id', authenticate, (req, res) => {
     try {
       const { id } = req.params;
-      const { invoice_number, customer_id, date, due_date, total_amount, vat_amount, status } = req.body;
+      const { invoice_number, customer_id, date, due_date, total_amount, vat_amount, status, payment_mode, payment_reference } = req.body;
       db.prepare(`
         UPDATE invoices 
-        SET invoice_number = ?, customer_id = ?, date = ?, due_date = ?, total_amount = ?, vat_amount = ?, status = ?
+        SET invoice_number = ?, customer_id = ?, date = ?, due_date = ?, total_amount = ?, vat_amount = ?, status = ?, payment_mode = ?, payment_reference = ?
         WHERE id = ?
-      `).run(invoice_number, customer_id, date, due_date, total_amount, vat_amount, status, id);
+      `).run(invoice_number, customer_id, date, due_date, total_amount, vat_amount, status, payment_mode || 'Cash', payment_reference || '', id);
       res.json({ message: 'Invoice updated' });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to update invoice', details: err.message });
@@ -813,7 +1024,7 @@ async function startServer() {
       `).get(id) as any;
       if (!order) return res.status(404).json({ error: 'Order not found' });
       
-      const items = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all();
+      const items = db.prepare('SELECT * FROM sales_order_items WHERE sales_order_id = ?').all(id);
       res.json({ ...order, items });
     } catch (err: any) {
       res.status(500).json({ error: 'Database error', details: err.message });
@@ -846,12 +1057,13 @@ async function startServer() {
         total_amount, 
         discount,
         tax_amount, 
+        description,
         items 
       } = req.body;
 
       const insertOrder = db.prepare(`
-        INSERT INTO sales_orders (order_number, customer_id, date, project_name, valid_until, revision, total_amount, discount, tax_amount)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sales_orders (order_number, customer_id, date, project_name, valid_until, revision, total_amount, discount, tax_amount, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertItem = db.prepare(`
@@ -859,17 +1071,25 @@ async function startServer() {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
+      const insertProject = db.prepare(`
+        INSERT INTO projects (name, client_name, budget, start_date, status)
+        VALUES (?, ?, ?, ?, 'active')
+      `);
+
+      const getCustomerName = db.prepare('SELECT name FROM customers WHERE id = ?');
+
       const transaction = db.transaction((orderData: any) => {
         const info = insertOrder.run(
           orderData.order_number, 
           orderData.customer_id, 
           orderData.date, 
-          orderData.project_name,
-          orderData.valid_until,
-          orderData.revision,
-          orderData.total_amount, 
-          orderData.discount,
-          orderData.tax_amount
+          orderData.project_name || null,
+          orderData.valid_until || null,
+          orderData.revision || null,
+          orderData.total_amount || 0, 
+          orderData.discount || 0,
+          orderData.tax_amount || 0,
+          orderData.description || null
         );
         const orderId = info.lastInsertRowid;
         
@@ -889,6 +1109,14 @@ async function startServer() {
             );
           }
         }
+
+        // Auto-create project
+        if (orderData.project_name) {
+          const customer = getCustomerName.get(orderData.customer_id) as any;
+          const clientName = customer ? customer.name : '';
+          insertProject.run(orderData.project_name, clientName, orderData.total_amount, orderData.date);
+        }
+
         return orderId;
       });
 
@@ -896,6 +1124,63 @@ async function startServer() {
       res.json({ id: orderId });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create sales order', details: err.message });
+    }
+  });
+
+  app.put('/api/sales-orders/:id', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      const { 
+        order_number, 
+        customer_id, 
+        date, 
+        project_name,
+        valid_until,
+        revision,
+        total_amount, 
+        discount,
+        tax_amount,
+        status,
+        description,
+        items 
+      } = req.body;
+
+      const transaction = db.transaction(() => {
+        db.prepare(`
+          UPDATE sales_orders 
+          SET order_number = ?, customer_id = ?, date = ?, project_name = ?, valid_until = ?, revision = ?, total_amount = ?, discount = ?, tax_amount = ?, status = ?, description = ?
+          WHERE id = ?
+        `).run(order_number, customer_id, date, project_name || null, valid_until || null, revision || null, total_amount || 0, discount || 0, tax_amount || 0, status || 'open', description || null, id);
+
+        db.prepare('DELETE FROM sales_order_items WHERE sales_order_id = ?').run(id);
+
+        const insertItem = db.prepare(`
+          INSERT INTO sales_order_items (sales_order_id, sn, description, unit, qty, unit_price, amount, is_lot, image_url, sub_category)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        if (items && Array.isArray(items)) {
+          for (const item of items) {
+            insertItem.run(
+              id, 
+              item.sn,
+              item.description, 
+              item.unit, 
+              item.qty, 
+              item.unitPrice || item.unit_price || 0, 
+              item.amount || 0,
+              item.isLot || item.is_lot ? 1 : 0,
+              item.image || item.image_url || null,
+              item.subCategory || item.sub_category || null
+            );
+          }
+        }
+      });
+
+      transaction();
+      res.json({ message: 'Sales order updated' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to update sales order', details: err.message });
     }
   });
 
@@ -914,6 +1199,10 @@ async function startServer() {
         valid_until, 
         revision, 
         parent_id,
+        description,
+        terms_and_conditions,
+        notes_json,
+        status,
         items 
       } = req.body;
 
@@ -923,17 +1212,17 @@ async function startServer() {
         if (quoteId) {
           db.prepare(`
             UPDATE quotations 
-            SET date = ?, customer_name = ?, customer_id = ?, project_name = ?, total_amount = ?, discount = ?, tax_amount = ?, valid_until = ?, revision = ?, parent_id = ?
+            SET date = ?, customer_name = ?, customer_id = ?, project_name = ?, total_amount = ?, discount = ?, tax_amount = ?, valid_until = ?, revision = ?, parent_id = ?, description = ?, terms_and_conditions = ?, notes_json = ?, status = COALESCE(?, 'sent')
             WHERE id = ?
-          `).run(date, customer_name, customer_id, project_name, total_amount, discount, tax_amount, valid_until, revision, parent_id || quoteId, quoteId);
+          `).run(date, customer_name, customer_id, project_name, total_amount, discount, tax_amount, valid_until, revision, parent_id || quoteId, description || null, terms_and_conditions || null, notes_json || null, status || 'sent', quoteId);
           
           // Delete old items to refresh
           db.prepare('DELETE FROM quotation_items WHERE quotation_id = ?').run(quoteId);
         } else {
           const info = db.prepare(`
-            INSERT INTO quotations (quotation_number, date, customer_name, customer_id, project_name, total_amount, discount, tax_amount, valid_until, revision, parent_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(quotation_number, date, customer_name, customer_id, project_name, total_amount, discount, tax_amount, valid_until, revision, parent_id || null);
+            INSERT INTO quotations (quotation_number, date, customer_name, customer_id, project_name, total_amount, discount, tax_amount, valid_until, revision, parent_id, description, terms_and_conditions, notes_json, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(quotation_number, date, customer_name, customer_id, project_name, total_amount, discount, tax_amount, valid_until, revision, parent_id || null, description || null, terms_and_conditions || null, notes_json || null, status || 'sent');
           quoteId = info.lastInsertRowid;
           
           if (!parent_id) {
@@ -975,61 +1264,337 @@ async function startServer() {
     }
   });
 
+  app.post('/api/quotations/:id/revise', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      const original = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as any;
+      if (!original) return res.status(404).json({ error: 'Original quotation not found' });
+
+      // Fetch items in order to ensure reconstruction works correctly
+      const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY id ASC').all(id) as any[];
+
+      // Calculate next revision number
+      let nextRevNum = 1;
+      const revMatch = original.revision?.match(/R(\d+)/i);
+      if (revMatch) {
+        nextRevNum = parseInt(revMatch[1]) + 1;
+      } else {
+        const latest = db.prepare('SELECT revision FROM quotations WHERE parent_id = ? ORDER BY id DESC LIMIT 1').get(original.parent_id || original.id) as any;
+        if (latest) {
+          const lRevMatch = latest.revision?.match(/R(\d+)/i);
+          if (lRevMatch) nextRevNum = parseInt(lRevMatch[1]) + 1;
+        }
+      }
+      const nextRevision = `R${nextRevNum}`;
+
+      const transaction = db.transaction(() => {
+        // Create new quotation record - including missing fields
+        const info = db.prepare(`
+          INSERT INTO quotations (
+            quotation_number, date, customer_name, customer_id, project_name, 
+            total_amount, discount, tax_amount, valid_until, revision, 
+            parent_id, description, terms_and_conditions, notes_json, status
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent')
+        `).run(
+          original.quotation_number,
+          new Date().toISOString().split('T')[0],
+          original.customer_name,
+          original.customer_id,
+          original.project_name,
+          original.total_amount,
+          original.discount,
+          original.tax_amount,
+          original.valid_until,
+          nextRevision,
+          original.parent_id || original.id,
+          original.description || null,
+          original.terms_and_conditions || null,
+          original.notes_json || null
+        );
+        const newId = info.lastInsertRowid;
+
+        // Clone items
+        const insertItem = db.prepare(`
+          INSERT INTO quotation_items (quotation_id, sn, description, unit, qty, unit_price, amount, is_lot, sub_category, parent_id, image_url)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const item of items) {
+          insertItem.run(
+            newId,
+            item.sn,
+            item.description,
+            item.unit,
+            item.qty,
+            item.unit_price,
+            item.amount,
+            item.is_lot,
+            item.sub_category,
+            item.parent_id,
+            item.image_url
+          );
+        }
+
+        return newId;
+      });
+
+      const newQuoteId = transaction();
+      res.json({ id: newQuoteId, revision: nextRevision, message: 'New revision created successfully' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to create revision', details: err.message });
+    }
+  });
+
+  app.get('/api/quotations/compare/:id1/:id2', authenticate, (req, res) => {
+    try {
+      const { id1, id2 } = req.params;
+      
+      const q1 = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id1) as any;
+      const q2 = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id2) as any;
+      
+      if (!q1 || !q2) return res.status(404).json({ error: 'One or both quotations not found' });
+      
+      const items1 = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sn ASC').all(q1.id) as any[];
+      const items2 = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sn ASC').all(q2.id) as any[];
+      
+      // We'll return a structure that maps items by SN for easy comparison
+      res.json({
+        q1: { ...q1, items: items1 },
+        q2: { ...q2, items: items2 }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to compare quotations', details: err.message });
+    }
+  });
+
+  app.get('/api/quotations/compare-multi/:ids', authenticate, (req, res) => {
+    try {
+      const { ids } = req.params;
+      const idArray = ids.split(',').map(Number);
+      
+      const quotations = idArray.map(id => {
+        const q = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as any;
+        if (!q) return null;
+        const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ? ORDER BY sn ASC').all(id) as any[];
+        return { ...q, items };
+      }).filter(Boolean);
+      
+      res.json(quotations);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to compare multi quotations', details: err.message });
+    }
+  });
+
   app.post('/api/quotations/:id/confirm', authenticate, (req, res) => {
     try {
       const { id } = req.params;
       const { order_number, date } = req.body;
+      console.log(`[APPROVAL] Attempting to confirm quotation ID: ${id} with Order No: ${order_number}`);
 
-      const quotation = db.prepare('SELECT * FROM quotations WHERE id = ? OR quotation_number = ?').get(id, id) as any;
-      if (!quotation) return res.status(404).json({ error: 'Quotation not found' });
-
-      if (quotation.status === 'confirmed') {
-        return res.status(400).json({ error: 'Quotation already confirmed' });
+      // 1. Find Quotation - support both inner ID and quotation_number string
+      let quotation = db.prepare('SELECT * FROM quotations WHERE id = ?').get(id) as any;
+      if (!quotation) {
+        quotation = db.prepare('SELECT * FROM quotations WHERE quotation_number = ? ORDER BY id DESC LIMIT 1').get(id) as any;
       }
 
-      const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ?').all();
+      if (!quotation) {
+        console.error(`[APPROVAL] Quotation not found for ID/No: ${id}`);
+        return res.status(404).json({ error: 'Quotation not found' });
+      }
 
-      const insertOrder = db.prepare(`
-        INSERT INTO sales_orders (order_number, quotation_id, customer_id, date, total_amount, tax_amount)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
+      const currentStatus = (quotation.status || '').toLowerCase();
+      if (currentStatus === 'confirmed' || currentStatus === 'approved' || currentStatus === 'salesorder') {
+        console.warn(`[APPROVAL] Quotation ${quotation.quotation_number} already in terminal state: ${currentStatus}`);
+        return res.status(400).json({ error: 'This quotation is already processed' });
+      }
+
+      const items = db.prepare('SELECT * FROM quotation_items WHERE quotation_id = ?').all(quotation.id);
       
+      const insertOrder = db.prepare(`
+        INSERT INTO sales_orders (order_number, quotation_id, customer_id, date, total_amount, tax_amount, project_name, valid_until, revision, discount, description)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
       const insertItem = db.prepare(`
-        INSERT INTO sales_order_items (sales_order_id, sn, description, unit, qty, unit_price, amount, is_lot, sub_category)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sales_order_items (sales_order_id, sn, description, unit, qty, unit_price, amount, is_lot, image_url, sub_category)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const updateQuotation = db.prepare("UPDATE quotations SET status = 'confirmed' WHERE id = ?");
 
+      const insertProject = db.prepare(`
+        INSERT INTO projects (name, client_name, budget, start_date, description)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+
+      const insertLedger = db.prepare(`
+        INSERT INTO project_ledger (project_id, date, description, reference, amount, type)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+
+      let result: any;
       const transaction = db.transaction(() => {
-        // Find or Create Customer if based on name
+        // Find or Create Customer
         let customerId = quotation.customer_id;
         if (!customerId || isNaN(Number(customerId))) {
           const cust = db.prepare('SELECT id FROM customers WHERE name = ?').get(quotation.customer_name) as any;
-          if (cust) {
-            customerId = cust.id;
-          } else {
-            // Defaulting to null or we could create a placeholder
-            customerId = null;
-          }
+          customerId = cust ? cust.id : db.prepare('INSERT INTO customers (name) VALUES (?)').run(quotation.customer_name).lastInsertRowid;
         }
 
-        const info = insertOrder.run(order_number, quotation.id, customerId, date, quotation.total_amount, quotation.tax_amount);
-        const orderId = info.lastInsertRowid;
+        // Create Sales Order
+        const orderInfo = insertOrder.run(
+          order_number, 
+          quotation.id, 
+          customerId, 
+          date, 
+          quotation.total_amount, 
+          quotation.tax_amount, 
+          quotation.project_name, 
+          quotation.valid_until, 
+          quotation.revision, 
+          quotation.discount, 
+          quotation.description || null
+        );
+        const orderId = orderInfo.lastInsertRowid;
 
         for (const item of items as any[]) {
-          insertItem.run(orderId, item.sn, item.description, item.unit, item.qty, item.unit_price, item.amount, item.is_lot, item.sub_category);
+          insertItem.run(orderId, item.sn, item.description, item.unit, item.qty, item.unit_price, item.amount, item.is_lot || 0, item.image_url || null, item.sub_category || null);
         }
 
+        // Create Project
+        const projInfo = insertProject.run(
+          quotation.project_name || `Project for ${quotation.quotation_number}`,
+          quotation.customer_name,
+          quotation.total_amount,
+          date,
+          `Converted from Quotation ${quotation.quotation_number}`
+        );
+        const projectId = projInfo.lastInsertRowid;
+
+        // Initial Ledger Entry
+        insertLedger.run(
+          projectId,
+          date,
+          `Initial Budget from ${quotation.quotation_number}`,
+          order_number,
+          quotation.total_amount,
+          'revenue'
+        );
+
         updateQuotation.run(quotation.id);
-        return orderId;
+        return { orderId, projectId };
       });
 
-      const orderId = transaction();
-      res.json({ id: orderId, message: 'Quotation confirmed and Sales Order created' });
+      result = transaction();
+      console.log(`[APPROVAL SUCCESS] Created Order ID: ${result.orderId}, Project ID: ${result.projectId}`);
+      res.json({ id: result.orderId, projectId: result.projectId, message: 'Proposal confirmed and converted successfully' });
     } catch (err: any) {
-      console.error(err);
-      res.status(500).json({ error: 'Failed to confirm quotation', details: err.message });
+      console.error('[APPROVAL ERROR]', err);
+      if (err.message?.includes('UNIQUE constraint failed')) {
+        return res.status(409).json({ error: 'Sales Order Number already exists' });
+      }
+      res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    }
+  });
+
+  // --- FINANCIAL SUMMARY APIs ---
+  app.get('/api/company/financial-summary', authenticate, (req: any, res) => {
+    try {
+      const revenue = db.prepare(`
+        SELECT SUM(amount) as total FROM project_ledger WHERE type = 'revenue'
+      `).get() as { total: number };
+      
+      const expenses = db.prepare(`
+        SELECT SUM(ABS(amount)) as total FROM project_ledger WHERE type = 'expense'
+      `).get() as { total: number };
+
+      // Better yet, use specific tables for higher precision if ledger isn't fully synced
+      const invoiceTotal = db.prepare(`SELECT SUM(total_amount) as total FROM invoices WHERE status = 'paid'`).get() as { total: number };
+      const billTotal = db.prepare(`SELECT SUM(total_amount) as total FROM bills WHERE status = 'paid'`).get() as { total: number };
+
+      const projects = db.prepare('SELECT COUNT(*) as count FROM projects').get() as { count: number };
+      const activeProjects = db.prepare("SELECT COUNT(*) as count FROM projects WHERE status = 'active'").get() as { count: number };
+
+      res.json({
+        totalRevenue: revenue.total || invoiceTotal.total || 0,
+        totalExpenses: expenses.total || billTotal.total || 0,
+        profit: (revenue.total || invoiceTotal.total || 0) - (expenses.total || billTotal.total || 0),
+        totalProjects: projects.count,
+        activeProjects: activeProjects.count
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch company summary', details: err.message });
+    }
+  });
+
+  app.get('/api/projects/:id/financial-summary', authenticate, (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+
+      const income = db.prepare(`
+        SELECT SUM(amount) as total FROM project_ledger WHERE project_id = ? AND type = 'revenue'
+      `).get(id) as { total: number };
+
+      const outgoings = db.prepare(`
+        SELECT SUM(ABS(amount)) as total FROM project_ledger WHERE project_id = ? AND type = 'expense'
+      `).get(id) as { total: number };
+
+      const invoices = db.prepare(`
+        SELECT SUM(total_amount) as total FROM invoices WHERE project_id = ?
+      `).get(id) as { total: number };
+
+      const bills = db.prepare(`
+        SELECT SUM(total_amount) as total FROM bills WHERE project_id = ?
+      `).get(id) as { total: number };
+
+      res.json({
+        projectName: project.name,
+        budget: project.budget,
+        revenue: income.total || invoices.total || 0,
+        expenses: outgoings.total || bills.total || 0,
+        margin: (income.total || invoices.total || 0) - (outgoings.total || bills.total || 0),
+        budgetUtilization: project.budget > 0 ? ((outgoings.total || bills.total || 0) / project.budget) * 100 : 0
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch project summary', details: err.message });
+    }
+  });
+
+  // --- PROJECT LEDGER API ---
+  app.get('/api/projects/:id/ledger', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      const ledger = db.prepare('SELECT * FROM project_ledger WHERE project_id = ? ORDER BY date DESC').all(id);
+      res.json(ledger);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Database error', details: err.message });
+    }
+  });
+
+  app.post('/api/projects/:id/ledger', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      const { date, description, reference, amount, type } = req.body;
+      const info = db.prepare(`
+        INSERT INTO project_ledger (project_id, date, description, reference, amount, type)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(id, date, description, reference, amount, type);
+      res.json({ id: info.lastInsertRowid });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to add ledger entry', details: err.message });
+    }
+  });
+
+  app.delete('/api/project-ledger/:id', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      db.prepare('DELETE FROM project_ledger WHERE id = ?').run(id);
+      res.json({ message: 'Ledger entry deleted' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to delete ledger entry', details: err.message });
     }
   });
 
@@ -1092,10 +1657,51 @@ async function startServer() {
     }
   });
 
+  // --- UNITS API ---
+  app.get('/api/units', authenticate, (req, res) => {
+    try {
+      const units = db.prepare('SELECT * FROM units ORDER BY name ASC').all();
+      res.json(units);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Database error', details: err.message });
+    }
+  });
+
+  app.post('/api/units', authenticate, (req, res) => {
+    try {
+      const { name } = req.body;
+      const info = db.prepare('INSERT INTO units (name) VALUES (?)').run(name);
+      res.json({ id: info.lastInsertRowid });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to create unit', details: err.message });
+    }
+  });
+
+  app.put('/api/units/:id', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name } = req.body;
+      db.prepare('UPDATE units SET name = ? WHERE id = ?').run(name, id);
+      res.json({ message: 'Unit updated' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to update unit', details: err.message });
+    }
+  });
+
+  app.delete('/api/units/:id', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      db.prepare('DELETE FROM units WHERE id = ?').run(id);
+      res.json({ message: 'Unit deleted' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to delete unit', details: err.message });
+    }
+  });
+
   app.get('/api/bills', authenticate, (req, res) => {
     try {
       const bills = db.prepare(`
-        SELECT b.*, s.name as supplier_name, p.name as project_name
+        SELECT b.*, s.name as vendor_name, p.name as project_name
         FROM bills b 
         LEFT JOIN suppliers s ON b.supplier_id = s.id
         LEFT JOIN projects p ON b.project_id = p.id
@@ -1118,22 +1724,126 @@ async function startServer() {
         WHERE b.id = ?
       `).get(id);
       if (!bill) return res.status(404).json({ error: 'Bill not found' });
-      res.json(bill);
+      
+      const items = db.prepare('SELECT * FROM bill_items WHERE bill_id = ?').all(id);
+      res.json({ ...bill, items });
     } catch (err: any) {
       res.status(500).json({ error: 'Database error', details: err.message });
     }
   });
 
-  app.post('/api/bills', authenticate, (req, res) => {
+  app.post('/api/bills/save', authenticate, (req, res) => {
     try {
-      const { bill_number, supplier_id, date, due_date, total_amount, vat_amount, project_id } = req.body;
-      const info = db.prepare(`
-        INSERT INTO bills (bill_number, supplier_id, date, due_date, total_amount, vat_amount, project_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(bill_number, supplier_id, date, due_date, total_amount, vat_amount, project_id);
-      res.json({ id: info.lastInsertRowid });
+      const { id, bill_number, supplier_id, project_id, date, due_date, total_amount, tax_amount, status, notes, items, payment_mode, payment_reference } = req.body;
+      
+      const transaction = db.transaction(() => {
+        let billId = id;
+        if (id) {
+          db.prepare(`
+            UPDATE bills 
+            SET bill_number = ?, supplier_id = ?, project_id = ?, date = ?, due_date = ?, total_amount = ?, vat_amount = ?, status = ?, payment_mode = ?, payment_reference = ?
+            WHERE id = ?
+          `).run(bill_number, supplier_id, project_id, date, due_date, total_amount, tax_amount, status || 'unpaid', payment_mode || null, payment_reference || null, id);
+          
+          db.prepare('DELETE FROM bill_items WHERE bill_id = ?').run(id);
+        } else {
+          const info = db.prepare(`
+            INSERT INTO bills (bill_number, supplier_id, project_id, date, due_date, total_amount, vat_amount, status, payment_mode, payment_reference)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(bill_number, supplier_id, project_id, date, due_date, total_amount, tax_amount, status || 'unpaid', payment_mode || null, payment_reference || null);
+          billId = info.lastInsertRowid;
+        }
+
+        if (items && Array.isArray(items)) {
+          const insertItem = db.prepare(`
+            INSERT INTO bill_items (bill_id, account_id, description, amount, tax_amount)
+            VALUES (?, ?, ?, ?, ?)
+          `);
+          for (const item of items) {
+            insertItem.run(billId, parseAccountId(item.account_id), item.description, item.amount, item.tax_amount);
+          }
+        }
+
+        // Handle project ledger integration if project_id is provided
+        if (project_id) {
+            db.prepare(`
+                INSERT INTO project_ledger (project_id, date, description, reference, amount, type)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `).run(project_id, date, `Bill: ${bill_number}`, bill_number, total_amount, 'expense');
+        }
+
+        return billId;
+      });
+
+      const finalId = transaction();
+      res.json({ id: finalId, message: 'Bill saved successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to create bill', details: err.message });
+      console.error(err);
+      res.status(500).json({ error: 'Failed to save bill', details: err.message });
+    }
+  });
+
+  app.post('/api/bills', authenticate, (req: any, res) => {
+    const { bill_number, supplier_id, date, due_date, total_amount, vat_amount, project_id, items, supplier_invoice_no, supplier_invoice_date, payment_mode, payment_reference } = req.body;
+    
+    // Start transaction
+    const createBill = db.transaction((billData: any) => {
+      const { lastInsertRowid: billId } = db.prepare(`
+        INSERT INTO bills (bill_number, supplier_id, date, due_date, total_amount, vat_amount, project_id, supplier_invoice_no, supplier_invoice_date, payment_mode, payment_reference)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(billData.bill_number, billData.supplier_id, billData.date, billData.due_date, billData.total_amount, billData.vat_amount, billData.project_id, billData.supplier_invoice_no, billData.supplier_invoice_date, billData.payment_mode || 'Cash', billData.payment_reference || '');
+
+      if (billData.items && billData.items.length > 0) {
+        const itemInsert = db.prepare(`
+          INSERT INTO bill_items (bill_id, inventory_item_id, description, qty, unit_price, discount, amount, tax_amount)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        
+        const updateStock = db.prepare(`
+          UPDATE inventory_items 
+          SET qty_on_hand = qty_on_hand + ?, 
+              project_id = CASE WHEN project_id IS NULL THEN ? ELSE project_id END,
+              location_type = CASE WHEN ? IS NOT NULL THEN 'project' ELSE location_type END
+          WHERE id = ?
+        `);
+
+        const insertMovement = db.prepare(`
+          INSERT INTO stock_movements (item_id, type, qty, date, reference)
+          VALUES (?, 'inbound', ?, ?, ?)
+        `);
+
+        for (const item of billData.items) {
+          const qty = Number(item.qty) || 0;
+          const price = Number(item.unit_price) || 0;
+          const discount = Number(item.discount) || 0;
+          const tax = Number(item.tax) || 0;
+          const finalTax = tax > 0 ? tax : (qty * price - discount) * 0.15; // default 15% if mapping fails
+
+          itemInsert.run(billId, item.inventory_item_id || null, item.description, item.qty, price, discount, item.amount, finalTax);
+          
+          if (item.inventory_item_id) {
+            updateStock.run(item.qty, billData.project_id, billData.project_id, item.inventory_item_id);
+            insertMovement.run(item.inventory_item_id, item.qty, billData.date, `Bill: ${billData.bill_number}`);
+          }
+        }
+      }
+
+      // Also record in project ledger if linked
+      if (billData.project_id) {
+        db.prepare(`
+          INSERT INTO project_ledger (project_id, date, description, reference, amount, type)
+          VALUES (?, ?, ?, ?, ?, 'expense')
+        `).run(billData.project_id, billData.date, `Purchase: ${billData.bill_number}`, billData.bill_number, -billData.total_amount);
+      }
+
+      return billId;
+    });
+
+    try {
+      const id = createBill({ bill_number, supplier_id, date, due_date, total_amount, vat_amount, project_id, items, supplier_invoice_no, supplier_invoice_date, payment_mode, payment_reference });
+      res.json({ id });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to record purchase', details: err.message });
     }
   });
 
@@ -1165,7 +1875,11 @@ async function startServer() {
   // --- INVENTORY: Items & Movements ---
   app.get('/api/inventory', authenticate, (req, res) => {
     try {
-      const items = db.prepare('SELECT * FROM inventory_items').all();
+      const items = db.prepare(`
+        SELECT i.*, p.name as project_name 
+        FROM inventory_items i 
+        LEFT JOIN projects p ON i.project_id = p.id
+      `).all();
       res.json(items);
     } catch (err: any) {
       res.status(500).json({ error: 'Database error fetching inventory', details: err.message });
@@ -1325,6 +2039,17 @@ async function startServer() {
     }
   });
 
+  app.patch('/api/project-categories/:id', authenticate, (req, res) => {
+    try {
+      const { id } = req.params;
+      const { name } = req.body;
+      db.prepare('UPDATE project_categories SET name = ? WHERE id = ?').run(name, id);
+      res.json({ message: 'Category updated' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to update category', details: err.message });
+    }
+  });
+
   app.delete('/api/project-categories/:id', authenticate, (req, res) => {
     try {
       const { id } = req.params;
@@ -1464,16 +2189,75 @@ async function startServer() {
     }
   });
 
+  // --- ACCOUNTING: Ledgers ---
+  app.get('/api/ledgers', authenticate, (req, res) => {
+    try {
+      const ledgers = db.prepare(`
+        SELECT l.*, c.name as account_name, c.code as account_code
+        FROM ledgers l
+        JOIN chart_of_accounts c ON l.account_id = c.id
+      `).all();
+      res.json(ledgers);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch ledgers', details: err.message });
+    }
+  });
+
+  app.post('/api/ledgers', authenticate, (req, res) => {
+    try {
+      const { name, account_id } = req.body;
+      const parsedId = parseAccountId(account_id);
+      const info = db.prepare('INSERT INTO ledgers (name, account_id) VALUES (?, ?)').run(name, parsedId);
+      res.status(201).json({ id: info.lastInsertRowid, name, account_id: parsedId });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to save ledger', details: err.message });
+    }
+  });
+
+  app.delete('/api/ledgers/:id', authenticate, (req, res) => {
+    try {
+      db.prepare('DELETE FROM ledgers WHERE id = ?').run(req.params.id);
+      res.json({ message: 'Ledger deleted' });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to delete ledger', details: err.message });
+    }
+  });
+
   // --- ACCOUNTING: Chart of Accounts, Journals, Recon ---
   app.get('/api/coa', authenticate, (req, res) => {
     try {
       const accounts = db.prepare(`
         SELECT 
           a.*,
-          (SELECT SUM(debit) - SUM(credit) FROM journal_items WHERE account_id = a.id) as balance
+          (SELECT SUM(debit) - SUM(credit) FROM journal_items WHERE account_id = a.id) as balance,
+          (SELECT group_concat(name, ' / ') FROM ledgers WHERE account_id = a.id) as ledgers
         FROM chart_of_accounts a
-      `).all();
-      res.json(accounts);
+      `).all() as any[];
+      
+      const allLedgers = db.prepare('SELECT * FROM ledgers').all() as any[];
+      const enrichedAccounts: any[] = [];
+      
+      accounts.forEach((a: any) => {
+        const accountLedgers = allLedgers.filter(l => l.account_id === a.id);
+        if (accountLedgers.length > 0) {
+          accountLedgers.forEach(l => {
+            enrichedAccounts.push({
+              ...a,
+              id: `${a.id}|${l.id}`,
+              actual_account_id: a.id,
+              display_name: `[Ledger: ${l.name}]`
+            });
+          });
+        } else {
+          enrichedAccounts.push({
+            ...a,
+            id: a.id.toString(),
+            actual_account_id: a.id,
+            display_name: `${a.code} - ${a.name}`
+          });
+        }
+      });
+      res.json(enrichedAccounts);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to fetch COA', details: err.message });
     }
@@ -1522,7 +2306,7 @@ async function startServer() {
     try {
       const { account_id, from, to } = req.query;
       
-      let effectiveAccountId = account_id;
+      let effectiveAccountId = parseAccountId(account_id);
       if (!effectiveAccountId) {
         const defaultAccount = db.prepare(`
           SELECT id FROM chart_of_accounts 
@@ -1616,7 +2400,7 @@ async function startServer() {
         
         const insertItem = db.prepare('INSERT INTO journal_items (journal_entry_id, account_id, debit, credit, memo) VALUES (?, ?, ?, ?, ?)');
         for (const item of data.items) {
-          insertItem.run(entryId, item.account_id, item.debit || 0, item.credit || 0, item.memo || '');
+          insertItem.run(entryId, parseAccountId(item.account_id), item.debit || 0, item.credit || 0, item.memo || '');
         }
         return entryId;
       });
@@ -1644,7 +2428,7 @@ async function startServer() {
 
   app.get('/api/reconciliation/transactions/:accountId', authenticate, (req, res) => {
     try {
-      const { accountId } = req.params;
+      const accountId = parseAccountId(req.params.accountId);
       
       // 1. Accounting entries (Journal Items)
       const journals = db.prepare(`
@@ -1694,7 +2478,7 @@ async function startServer() {
   app.post('/api/bank-reconciliations', authenticate, (req, res) => {
     try {
       const { account_id, statement_date, statement_balance, ledger_balance } = req.body;
-      const info = db.prepare('INSERT INTO bank_reconciliations (account_id, statement_date, statement_balance, ledger_balance) VALUES (?, ?, ?, ?)').run(account_id, statement_date, statement_balance, ledger_balance);
+      const info = db.prepare('INSERT INTO bank_reconciliations (account_id, statement_date, statement_balance, ledger_balance) VALUES (?, ?, ?, ?)').run(parseAccountId(account_id), statement_date, statement_balance, ledger_balance);
       res.json({ id: info.lastInsertRowid });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create reconciliation', details: err.message });
