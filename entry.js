@@ -7,5 +7,5 @@
 
 console.log('--- Starting ITQAN ERP (Production) ---');
 
-// Import the bundled server
-import './dist-server/index.js';
+// Import the bundled server (using .cjs extension ensures it is treated as CommonJS)
+import './dist-server/index.cjs';
