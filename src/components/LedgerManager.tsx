@@ -88,7 +88,7 @@ export default function LedgerManager({ accounts }: { accounts: any[] }) {
               <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase text-slate-500 tracking-widest">Map to Chart of Account</label>
                 <Combobox
-                  options={Array.from(new Map(accounts.map(a => [a.actual_account_id || a.id, a])).values()).map(a => ({ label: `[${a.code}] ${a.name}`, value: (a.actual_account_id || a.id).toString() }))}
+                  options={Array.from(new Map((Array.isArray(accounts) ? accounts : []).map(a => [a.actual_account_id || a.id, a])).values()).map(a => ({ label: `[${a.code}] ${a.name}`, value: (a.actual_account_id || a.id).toString() }))}
                   value={formData.account_id}
                   onValueChange={v => setFormData({...formData, account_id: v})}
                   placeholder="Select account"

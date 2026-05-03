@@ -310,6 +310,21 @@ db.exec(`
     name TEXT NOT NULL UNIQUE
   );
 
+  CREATE TABLE IF NOT EXISTS bank_statement_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    transaction_date TEXT,
+    description TEXT,
+    reference TEXT,
+    debit REAL DEFAULT 0,
+    credit REAL DEFAULT 0,
+    balance REAL DEFAULT 0,
+    status TEXT DEFAULT 'unreconciled', -- unreconciled, reconciled
+    matched_journal_item_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id)
+  );
+
   CREATE TABLE IF NOT EXISTS bank_reconciliations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER,
@@ -619,7 +634,7 @@ if (customerCount.count === 0) {
 // --- SERVER SETUP ---
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
+  const PORT = 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -2373,6 +2388,398 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate cash book', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/trial-balance', authenticate, (req, res) => {
+    try {
+      const accounts = db.prepare(`
+        SELECT 
+          coa.code, 
+          coa.name, 
+          SUM(ji.debit) as total_debit, 
+          SUM(ji.credit) as total_credit
+        FROM chart_of_accounts coa
+        LEFT JOIN journal_items ji ON coa.id = ji.account_id
+        LEFT JOIN journal_entries je ON ji.journal_entry_id = je.id
+        GROUP BY coa.id
+        HAVING SUM(ji.debit) > 0 OR SUM(ji.credit) > 0
+        ORDER BY coa.code ASC
+      `).all() as any[];
+
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate trial balance', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/profit-loss', authenticate, (req, res) => {
+    try {
+      const { from, to } = req.query;
+      const startDate = from || new Date().toISOString().split('T')[0].substring(0, 7) + '-01';
+      const endDate = to || new Date().toISOString().split('T')[0];
+
+      const revenue = db.prepare(`
+        SELECT coa.name, SUM(ji.credit) - SUM(ji.debit) as amount
+        FROM chart_of_accounts coa
+        JOIN journal_items ji ON coa.id = ji.account_id
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE coa.type = 'Revenue' AND je.date BETWEEN ? AND ?
+        GROUP BY coa.id
+      `).all(startDate, endDate);
+
+      const expenses = db.prepare(`
+        SELECT coa.name, SUM(ji.debit) - SUM(ji.credit) as amount, coa.type as category
+        FROM chart_of_accounts coa
+        JOIN journal_items ji ON coa.id = ji.account_id
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE coa.type = 'Expense' AND je.date BETWEEN ? AND ?
+        GROUP BY coa.id
+      `).all(startDate, endDate);
+
+      res.json({ revenue, expenses, startDate, endDate });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate P&L', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/balance-sheet', authenticate, (req, res) => {
+    try {
+      const { date } = req.query;
+      const targetDate = date || new Date().toISOString().split('T')[0];
+
+      const assets = db.prepare(`
+        SELECT coa.name, SUM(ji.debit) - SUM(ji.credit) as amount
+        FROM chart_of_accounts coa
+        JOIN journal_items ji ON coa.id = ji.account_id
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE coa.type = 'Asset' AND je.date <= ?
+        GROUP BY coa.id
+        HAVING amount != 0
+      `).all(targetDate);
+
+      const liabilities = db.prepare(`
+        SELECT coa.name, SUM(ji.credit) - SUM(ji.debit) as amount
+        FROM chart_of_accounts coa
+        JOIN journal_items ji ON coa.id = ji.account_id
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE coa.type = 'Liability' AND je.date <= ?
+        GROUP BY coa.id
+        HAVING amount != 0
+      `).all(targetDate);
+
+      const equity = db.prepare(`
+        SELECT coa.name, SUM(ji.credit) - SUM(ji.debit) as amount
+        FROM chart_of_accounts coa
+        JOIN journal_items ji ON coa.id = ji.account_id
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE coa.type = 'Equity' AND je.date <= ?
+        GROUP BY coa.id
+        HAVING amount != 0
+      `).all(targetDate);
+
+      res.json({ assets, liabilities, equity, date: targetDate });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate balance sheet', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/aging/sales', authenticate, (req, res) => {
+    try {
+      const invoices = db.prepare(`
+        SELECT i.*, c.name as customer_name,
+               (i.total_amount + i.vat_amount) as grand_total,
+               julianday('now') - julianday(i.date) as age_days
+        FROM invoices i
+        JOIN customers c ON i.customer_id = c.id
+        WHERE i.status != 'paid'
+        ORDER BY i.date ASC
+      `).all() as any[];
+
+      const summary = {
+        current: 0,
+        days_30: 0,
+        days_60: 0,
+        days_90: 0,
+        over_90: 0,
+        total: 0
+      };
+
+      invoices.forEach(inv => {
+        const amount = inv.grand_total;
+        summary.total += amount;
+        if (inv.age_days <= 30) summary.current += amount;
+        else if (inv.age_days <= 60) summary.days_30 += amount;
+        else if (inv.age_days <= 90) summary.days_60 += amount;
+        else if (inv.age_days <= 120) summary.days_90 += amount;
+        else summary.over_90 += amount;
+      });
+
+      res.json({ invoices, summary });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate sales aging', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/aging/purchase', authenticate, (req, res) => {
+    try {
+      const bills = db.prepare(`
+        SELECT b.*, s.name as supplier_name,
+               (b.total_amount + b.vat_amount) as grand_total,
+               julianday('now') - julianday(b.date) as age_days
+        FROM bills b
+        JOIN suppliers s ON b.supplier_id = s.id
+        WHERE b.status != 'paid'
+        ORDER BY b.date ASC
+      `).all() as any[];
+
+      const summary = {
+        current: 0,
+        days_30: 0,
+        days_60: 0,
+        days_90: 0,
+        over_90: 0,
+        total: 0
+      };
+
+      bills.forEach(bill => {
+        const amount = bill.grand_total;
+        summary.total += amount;
+        if (bill.age_days <= 30) summary.current += amount;
+        else if (bill.age_days <= 60) summary.days_30 += amount;
+        else if (bill.age_days <= 90) summary.days_60 += amount;
+        else if (bill.age_days <= 120) summary.days_90 += amount;
+        else summary.over_90 += amount;
+      });
+
+      res.json({ bills, summary });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate purchase aging', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/vat', authenticate, (req, res) => {
+    try {
+      const { from, to } = req.query;
+      const startDate = from || new Date().toISOString().split('T')[0].substring(0, 7) + '-01';
+      const endDate = to || new Date().toISOString().split('T')[0];
+
+      const salesVat = db.prepare(`
+        SELECT invoice_number as reference, date, customer_id as partner_id, customer_name as partner_name, 
+               total_amount as base_amount, vat_amount as tax_amount
+        FROM (SELECT i.*, c.name as customer_name FROM invoices i JOIN customers c ON i.customer_id = c.id)
+        WHERE date BETWEEN ? AND ?
+      `).all(startDate, endDate);
+
+      const purchaseVat = db.prepare(`
+        SELECT bill_number as reference, date, supplier_id as partner_id, supplier_name as partner_name,
+               total_amount as base_amount, vat_amount as tax_amount
+        FROM (SELECT b.*, s.name as supplier_name FROM bills b JOIN suppliers s ON b.supplier_id = s.id)
+        WHERE date BETWEEN ? AND ?
+      `).all(startDate, endDate);
+
+      res.json({ salesVat, purchaseVat, startDate, endDate });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate VAT report', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/cashflow', authenticate, (req, res) => {
+    try {
+      const { from, to } = req.query;
+      const startDate = from || new Date().toISOString().split('T')[0].substring(0, 7) + '-01';
+      const endDate = to || new Date().toISOString().split('T')[0];
+
+      const cashAccounts = db.prepare(`
+        SELECT id, name FROM chart_of_accounts 
+        WHERE (name LIKE '%Cash%' OR name LIKE '%Bank%') AND type = 'Asset'
+      `).all() as any[];
+
+      const accountIds = cashAccounts.map(a => a.id);
+      if (accountIds.length === 0) return res.json({ receipts: [], payments: [], net_flow: 0 });
+
+      const placeholders = accountIds.map(() => '?').join(',');
+      
+      const transactions = db.prepare(`
+        SELECT ji.*, je.date, je.description, je.reference
+        FROM journal_items ji
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE ji.account_id IN (${placeholders}) AND je.date BETWEEN ? AND ?
+        ORDER BY je.date ASC
+      `).all(...accountIds, startDate, endDate) as any[];
+
+      const receipts = transactions.filter(t => t.debit > 0);
+      const payments = transactions.filter(t => t.credit > 0);
+      
+      const totalInflow = receipts.reduce((s, t) => s + t.debit, 0);
+      const totalOutflow = payments.reduce((s, t) => s + t.credit, 0);
+
+      res.json({ receipts, payments, totalInflow, totalOutflow, net_flow: totalInflow - totalOutflow });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate cash flow', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/transactions', authenticate, (req, res) => {
+    try {
+      const { type, from, to } = req.query;
+      const startDate = from || new Date().toISOString().split('T')[0].substring(0, 7) + '-01';
+      const endDate = to || new Date().toISOString().split('T')[0];
+
+      let data = [];
+      if (type === 'sales') {
+        data = db.prepare(`SELECT i.*, c.name as partner_name FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.date BETWEEN ? AND ?`).all(startDate, endDate);
+      } else if (type === 'purchase') {
+        data = db.prepare(`SELECT b.*, s.name as partner_name FROM bills b JOIN suppliers s ON b.supplier_id = s.id WHERE b.date BETWEEN ? AND ?`).all(startDate, endDate);
+      } else {
+        // Generic from journal entries
+        data = db.prepare(`
+          SELECT je.*, SUM(ji.debit) as amount
+          FROM journal_entries je
+          JOIN journal_items ji ON je.id = ji.journal_entry_id
+          WHERE je.date BETWEEN ? AND ?
+          GROUP BY je.id
+        `).all(startDate, endDate);
+      }
+
+      res.json(data);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate transaction report', details: err.message });
+    }
+  });
+
+  app.post('/api/bank/upload-statement', authenticate, (req, res) => {
+    try {
+      const { accountId, transactions } = req.body;
+      if (!accountId || !transactions) return res.status(400).json({ error: 'Missing accountId or transactions' });
+
+      const insert = db.prepare(`
+        INSERT INTO bank_statement_items 
+        (account_id, transaction_date, description, reference, debit, credit, balance, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'unreconciled')
+      `);
+
+      const transaction = db.transaction((items) => {
+        for (const item of items) {
+          // Parse amount based on type 'Debit' or 'Credit'
+          const debit = item.type === 'Debit' ? item.amount : 0;
+          const credit = item.type === 'Credit' ? item.amount : 0;
+          
+          insert.run(
+            accountId,
+            item.date,
+            item.particulars,
+            item.ref || '',
+            debit,
+            credit,
+            item.balance || 0
+          );
+        }
+      });
+
+      transaction(transactions);
+      res.json({ success: true, count: transactions.length });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to upload bank statement', details: err.message });
+    }
+  });
+
+  app.get('/api/bank/reconciliation-data', authenticate, (req, res) => {
+    try {
+      const { accountId } = req.query;
+      if (!accountId) return res.status(400).json({ error: 'AccountId required' });
+
+      // Unreconciled bank statement items
+      const bankItems = db.prepare(`
+        SELECT * FROM bank_statement_items 
+        WHERE account_id = ? AND status = 'unreconciled'
+        ORDER BY transaction_date ASC
+      `).all(accountId);
+
+      // Potential matching internal journal items (unreconciled)
+      // We look for journal items in this account that aren't yet linked in bank_statement_items
+      const internalItems = db.prepare(`
+        SELECT ji.*, je.date, je.description, je.reference
+        FROM journal_items ji
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE ji.account_id = ? 
+        AND ji.id NOT IN (SELECT matched_journal_item_id FROM bank_statement_items WHERE matched_journal_item_id IS NOT NULL)
+        ORDER BY je.date ASC
+      `).all(accountId);
+
+      res.json({ bankItems, internalItems });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch reconciliation data', details: err.message });
+    }
+  });
+
+  app.post('/api/bank/reconcile', authenticate, (req, res) => {
+    try {
+      const { bankItemId, journalItemId } = req.body;
+      
+      const updateBank = db.prepare(`
+        UPDATE bank_statement_items 
+        SET status = 'reconciled', matched_journal_item_id = ?
+        WHERE id = ?
+      `);
+
+      updateBank.run(journalItemId, bankItemId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to reconcile', details: err.message });
+    }
+  });
+
+  app.get('/api/reports/bank-statement', authenticate, (req, res) => {
+    try {
+      const { accountId, from, to } = req.query;
+      if (!accountId) return res.status(400).json({ error: 'Account ID is required' });
+
+      const startDate = from || new Date().toISOString().split('T')[0].substring(0, 7) + '-01';
+      const endDate = to || new Date().toISOString().split('T')[0];
+
+      // 1. Calculate Opening Balance (balance before startDate)
+      const openingBalanceRes = db.prepare(`
+        SELECT SUM(ji.debit) - SUM(ji.credit) as balance
+        FROM journal_items ji
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE ji.account_id = ? AND je.date < ?
+      `).get(accountId, startDate) as any;
+      
+      const openingBalance = openingBalanceRes?.balance || 0;
+
+      // 2. Fetch transactions within range
+      const transactions = db.prepare(`
+        SELECT ji.*, je.date, je.description, je.reference
+        FROM journal_items ji
+        JOIN journal_entries je ON ji.journal_entry_id = je.id
+        WHERE ji.account_id = ? AND je.date BETWEEN ? AND ?
+        ORDER BY je.date ASC, je.id ASC
+      `).all(accountId, startDate, endDate) as any[];
+
+      // 3. Calculate running balance and totals
+      let currentBalance = openingBalance;
+      let totalIn = 0;
+      let totalOut = 0;
+
+      const statement = transactions.map(t => {
+        currentBalance += (t.debit - t.credit);
+        if (t.debit > 0) totalIn += t.debit;
+        if (t.credit > 0) totalOut += t.credit;
+        return { ...t, balance: currentBalance };
+      });
+
+      res.json({
+        openingBalance,
+        closingBalance: currentBalance,
+        totalIn,
+        totalOut,
+        transactions: statement,
+        startDate,
+        endDate
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate bank statement', details: err.message });
     }
   });
 

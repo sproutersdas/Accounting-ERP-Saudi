@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -473,9 +474,10 @@ export function ChartOfAccounts() {
     try {
       const res = await fetch('/api/coa');
       const data = await res.json();
-      setAccounts(data);
+      setAccounts(Array.isArray(data) ? data : []);
     } catch (err) {
       toast.error('Failed to load accounts');
+      setAccounts([]);
     } finally {
       setLoading(false);
     }
@@ -549,7 +551,7 @@ export function ChartOfAccounts() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {accounts.map(acc => (
+            {(Array.isArray(accounts) ? accounts : []).map(acc => (
               <TableRow key={acc.code} className="hover:bg-slate-50/50 transition-colors border-b border-slate-50">
                 <TableCell className="px-6 font-mono text-[11px] font-bold text-slate-400">{acc.code}</TableCell>
                 <TableCell className="font-bold text-sm text-slate-800">{acc.name}</TableCell>
@@ -800,7 +802,7 @@ function JournalEntryForm({ onBack }: { onBack: () => void }) {
                   <TableRow key={idx} className="border-b border-slate-50 last:border-none">
                     <TableCell className="px-6 py-2">
                       <Combobox
-                        options={accounts.map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
+                        options={(Array.isArray(accounts) ? accounts : []).map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
                         value={(item.account_id || "").toString()}
                         onValueChange={v => {
                           const items = [...newEntry.items];
@@ -917,47 +919,95 @@ export function BankReconciliation() {
     }
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
-      const text = event.target?.result as string;
-      const lines = text.split('\n');
-      const data = lines.slice(1).map(line => {
-        const [date, desc, amount] = line.split(',');
-        if (!date || !amount) return null;
-        return { 
-          date: date.trim(), 
-          description: desc?.trim(), 
-          amount: parseFloat(amount.trim()),
-          id: Math.random().toString(36).substr(2, 9)
-        };
-      }).filter(Boolean);
-      
-      setStatementData(data);
-      await fetchSystemTransactions(selectedAccountId);
-      autoMatch(data);
+    reader.onload = (event) => {
+      try {
+        const bstr = event.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const rawData = XLSX.utils.sheet_to_json(ws);
+        
+        console.log('Raw Excel Data:', rawData);
+
+        const data = rawData.map((row: any) => {
+          // Normalize keys (case insensitive and handling spaces)
+          const findKey = (names: string[]) => {
+            const key = Object.keys(row).find(k => names.some(n => k.toLowerCase().includes(n.toLowerCase())));
+            return key ? row[key] : null;
+          };
+
+          const date = findKey(['transaction date', 'date']);
+          const particulars = findKey(['particulars', 'description', 'particular']);
+          const type = findKey(['type', 'transaction type']);
+          const rawAmount = findKey(['amount', 'transaction amount']);
+          const balance = findKey(['balance', 'closing balance']);
+
+          if (!date || rawAmount === null) return null;
+
+          // Convert Excel date if it's a number
+          let formattedDate = date;
+          if (typeof date === 'number') {
+            const excelDate = new Date(Date.UTC(0, 0, date - 1));
+            formattedDate = excelDate.toISOString().split('T')[0];
+          }
+
+          const amount = parseFloat(rawAmount.toString().replace(/,/g, ''));
+          const isDebit = type?.toString().toLowerCase().includes('debit');
+          const isCredit = type?.toString().toLowerCase().includes('credit');
+
+          // Bank perspective: Credit is Money In (+), Debit is Money Out (-)
+          const signedAmount = isDebit ? -amount : (isCredit ? amount : amount);
+
+          return {
+            id: Math.random().toString(36).substr(2, 9),
+            date: formattedDate,
+            description: particulars || '',
+            type: isDebit ? 'Debit' : (isCredit ? 'Credit' : 'N/A'),
+            bankAmount: amount, // Positive absolute value for UI
+            amount: signedAmount, // For systemic matching
+            balance: balance ? parseFloat(balance.toString().replace(/,/g, '')) : 0
+          };
+        }).filter(Boolean);
+
+        setStatementData(data);
+        setMatchingMode(true);
+        fetchSystemTransactions(selectedAccountId);
+        setTimeout(() => autoMatch(data), 500);
+      } catch (err) {
+        console.error('Excel Parsing Error:', err);
+        toast.error('Failed to parse Excel file');
+      }
     };
-    reader.readAsText(file);
+    reader.readAsBinaryString(file);
   };
 
   const fetchSystemTransactions = async (accountId: string) => {
     try {
-      const res = await fetch(`/api/reconciliation/transactions/${accountId}`);
+      const res = await fetch(`/api/bank/reconciliation-data?accountId=${accountId}`);
       if (!res.ok) throw new Error('Failed to fetch ledger transactions');
       const data = await res.json();
-      setSystemTransactions(data);
+      // data.internalItems from the server
+      setSystemTransactions(data.internalItems.map((item: any) => ({
+        ...item,
+        // System asset side: Debit is Money In (+), Credit is Money Out (-)
+        systemAmount: item.debit - item.credit
+      })));
     } catch (err: any) {
       toast.error(err.message);
     }
   };
 
   const autoMatch = (statement: any[]) => {
-    // Basic matching algorithm
     const newMatches: any[] = [];
     const usedSystemIds = new Set();
 
     statement.forEach(s => {
+      // Look for a ledger item with same date and matching sign-flipped amount
+      // Because Bank Statement IN (+) = System Books IN (+)
+      // Bank Statement OUT (-) = System Books OUT (-)
       const match = systemTransactions.find(sys => 
         !usedSystemIds.has(sys.id) &&
-        Math.abs(sys.amount - s.amount) < 0.01 &&
+        Math.abs(sys.systemAmount - s.amount) < 0.01 &&
         sys.date === s.date
       );
 
@@ -969,6 +1019,67 @@ export function BankReconciliation() {
 
     setMatches(newMatches);
     toast.success(`Automatically matched ${newMatches.length} transactions`);
+  };
+
+  const handleFinalize = async () => {
+    try {
+      setLoading(true);
+      
+      // 1. Upload the entire statement for this account first
+      const uploadRes = await fetch('/api/bank/upload-statement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: selectedAccountId,
+          transactions: statementData.map(s => ({
+            date: s.date,
+            particulars: s.description,
+            type: s.type,
+            amount: s.bankAmount,
+            balance: s.balance
+          }))
+        })
+      });
+
+      if (!uploadRes.ok) throw new Error('Failed to upload statement');
+      
+      // 2. Refresh reconciliation data to get the new DB IDs for the bank items
+      const refreshRes = await fetch(`/api/bank/reconciliation-data?accountId=${selectedAccountId}`);
+      const { bankItems } = await refreshRes.json();
+
+      // 3. Perform reconciliation for the matched pairs
+      for (const m of matches) {
+        const stmtItem = statementData.find(s => s.id === m.statementId);
+        if (!stmtItem) continue;
+
+        // Find the corresponding item in the newly uploaded DB records by matching characteristics
+        const dbBankItem = bankItems.find((bi: any) => 
+          bi.transaction_date === stmtItem.date && 
+          bi.description === stmtItem.description &&
+          (Math.abs(bi.debit - Math.abs(stmtItem.amount)) < 0.01 || Math.abs(bi.credit - Math.abs(stmtItem.amount)) < 0.01)
+        );
+
+        if (dbBankItem) {
+          await fetch('/api/bank/reconcile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              bankItemId: dbBankItem.id,
+              journalItemId: m.systemId
+            })
+          });
+        }
+      }
+
+      toast.success('Reconciliation completed successfully');
+      setMatchingMode(false);
+      setStatementData([]);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleStart = async (e: React.FormEvent) => {
@@ -1010,15 +1121,16 @@ export function BankReconciliation() {
           {/* Statement Side */}
           <Card className="border-none shadow-sm bg-white overflow-hidden">
             <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-3 px-6 text-center">
-              <CardTitle className="text-[10px] font-black uppercase tracking-widest text-slate-400">Bank Statement Data</CardTitle>
+              <CardTitle className="text-[10px] font-black uppercase tracking-widest text-slate-400">Statement Side (Bank)</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
                <Table>
                  <TableHeader className="bg-slate-50/30">
                    <TableRow className="h-10 hover:bg-transparent">
                      <TableHead className="px-6 text-[9px] font-black uppercase text-slate-400">Date</TableHead>
-                     <TableHead className="text-[9px] font-black uppercase text-slate-400">Description</TableHead>
-                     <TableHead className="text-[9px] font-black uppercase text-slate-400 text-right">Amount</TableHead>
+                     <TableHead className="text-[9px] font-black uppercase text-slate-400">Details</TableHead>
+                     <TableHead className="text-[9px] font-black uppercase text-slate-400 text-right">Debit</TableHead>
+                     <TableHead className="text-[9px] font-black uppercase text-slate-400 text-right">Credit</TableHead>
                      <TableHead className="w-10"></TableHead>
                    </TableRow>
                  </TableHeader>
@@ -1026,12 +1138,17 @@ export function BankReconciliation() {
                    {statementData.map(s => {
                      const isMatched = matches.find(m => m.statementId === s.id);
                      return (
-                       <TableRow key={s.id} className={`h-12 border-b border-slate-50 ${isMatched ? 'bg-blue-50/30' : ''}`}>
-                         <TableCell className="px-6 text-[11px] font-bold text-slate-600">{s.date}</TableCell>
-                         <TableCell className="text-[11px] font-medium text-slate-700 truncate max-w-[150px]">{s.description}</TableCell>
-                         <TableCell className="text-[11px] font-black text-right text-slate-900">{s.amount.toLocaleString()}</TableCell>
+                       <TableRow key={s.id} className={`h-12 border-b border-slate-50 ${isMatched ? 'bg-blue-50/10' : ''}`}>
+                         <TableCell className="px-6 text-[11px] font-bold text-slate-600 font-mono tracking-tighter">{s.date}</TableCell>
+                         <TableCell className="text-[10px] font-medium text-slate-700 uppercase whitespace-normal break-words min-w-[200px] leading-relaxed py-3">{s.description}</TableCell>
+                         <TableCell className="text-[11px] font-mono font-bold text-right text-red-500">
+                           {s.type === 'Debit' ? s.bankAmount.toLocaleString() : '-'}
+                         </TableCell>
+                         <TableCell className="text-[11px] font-mono font-bold text-right text-green-600">
+                           {s.type === 'Credit' ? s.bankAmount.toLocaleString() : '-'}
+                         </TableCell>
                          <TableCell className="px-4">
-                           {isMatched ? <CheckCircle className="h-4 w-4 text-blue-500" /> : <AlertCircle className="h-4 w-4 text-primary" />}
+                           {isMatched ? <CheckCircle className="h-4 w-4 text-blue-500" /> : <AlertCircle className="h-4 w-4 text-slate-300" />}
                          </TableCell>
                        </TableRow>
                      );
@@ -1044,32 +1161,32 @@ export function BankReconciliation() {
           {/* Ledger Side */}
           <Card className="border-none shadow-sm bg-white overflow-hidden">
             <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-3 px-6 text-center">
-              <CardTitle className="text-[10px] font-black uppercase tracking-widest text-slate-400">System Ledger Entries</CardTitle>
+              <CardTitle className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ledger Side (Books)</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
                <Table>
                  <TableHeader className="bg-slate-50/30">
                    <TableRow className="h-10 hover:bg-transparent">
                      <TableHead className="px-6 text-[9px] font-black uppercase text-slate-400">Date</TableHead>
-                     <TableHead className="text-[9px] font-black uppercase text-slate-400">Reference</TableHead>
-                     <TableHead className="text-[9px] font-black uppercase text-slate-400 text-right">Ledger Amt</TableHead>
+                     <TableHead className="text-[9px] font-black uppercase text-slate-400">Ref/Source</TableHead>
+                     <TableHead className="text-[9px] font-black uppercase text-slate-400 text-right">Debit</TableHead>
+                     <TableHead className="text-[9px] font-black uppercase text-slate-400 text-right">Credit</TableHead>
                      <TableHead className="w-10"></TableHead>
                    </TableRow>
                  </TableHeader>
                  <TableBody>
                    {systemTransactions.map(sys => {
                      const isMatched = matches.find(m => m.systemId === sys.id);
-                     const amount = sys.amount;
                      return (
-                       <TableRow key={sys.id} className={`h-12 border-b border-slate-50 ${isMatched ? 'bg-blue-50/30' : ''}`}>
-                         <TableCell className="px-6 text-[11px] font-bold text-slate-600">
-                           <div className="flex flex-col">
-                             <span>{sys.date}</span>
-                             <Badge variant="outline" className="w-fit text-[7px] px-1 py-0 border-none bg-slate-100 text-slate-400 font-bold uppercase">{sys.type}</Badge>
-                           </div>
+                       <TableRow key={sys.id} className={`h-12 border-b border-slate-50 ${isMatched ? 'bg-blue-50/10' : ''}`}>
+                         <TableCell className="px-6 text-[11px] font-bold text-slate-600 font-mono tracking-tighter">{sys.date}</TableCell>
+                         <TableCell className="text-[10px] font-medium text-slate-700 truncate max-w-[120px] uppercase">{sys.reference || sys.description}</TableCell>
+                         <TableCell className="text-[11px] font-mono font-bold text-right text-blue-600">
+                           {sys.debit > 0 ? sys.debit.toLocaleString() : '-'}
                          </TableCell>
-                         <TableCell className="text-[11px] font-medium text-slate-700 truncate max-w-[150px]">{sys.reference || sys.description}</TableCell>
-                         <TableCell className={`text-[11px] font-black text-right ${amount < 0 ? 'text-red-500' : 'text-blue-600'}`}>{amount.toLocaleString()}</TableCell>
+                         <TableCell className="text-[11px] font-mono font-bold text-right text-orange-600">
+                           {sys.credit > 0 ? sys.credit.toLocaleString() : '-'}
+                         </TableCell>
                          <TableCell className="px-4">
                             {isMatched ? <CheckCircle className="h-4 w-4 text-blue-500" /> : <div className="h-4 w-4" />}
                          </TableCell>
@@ -1083,7 +1200,9 @@ export function BankReconciliation() {
         </div>
         
         <div className="flex justify-end pt-4">
-          <Button disabled={matches.length === 0} className="bg-blue-600 hover:bg-blue-700 h-11 px-8 text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-500/20">Finalize Reconciliation</Button>
+          <Button onClick={handleFinalize} disabled={matches.length === 0 || loading} className="bg-blue-600 hover:bg-blue-700 h-11 px-8 text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-500/20">
+            {loading ? 'Processing...' : 'Finalize Reconciliation'}
+          </Button>
         </div>
       </div>
     );
@@ -1105,7 +1224,7 @@ export function BankReconciliation() {
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-black uppercase text-slate-400">Target Bank Account</Label>
                   <Combobox
-                    options={accounts.map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
+                    options={(Array.isArray(accounts) ? accounts : []).map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
                     value={newRecon.account_id ? newRecon.account_id.toString() : ""}
                     onValueChange={v => setNewRecon({ ...newRecon, account_id: v })}
                     placeholder="Select Account"
@@ -1151,7 +1270,7 @@ export function BankReconciliation() {
            <div className="flex-1 w-full space-y-2">
              <Label className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Select Account to Analyze</Label>
              <Combobox
-               options={accounts.map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
+               options={(Array.isArray(accounts) ? accounts : []).map(acc => ({ label: acc.display_name, value: acc.id.toString() }))}
                value={selectedAccountId ? selectedAccountId.toString() : ""}
                onValueChange={setSelectedAccountId}
                placeholder="Begin by choosing a bank account..."
@@ -1176,7 +1295,7 @@ export function BankReconciliation() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {recons.map(r => (
+        {(Array.isArray(recons) ? recons : []).map(r => (
           <Card key={r.id} className="border-none shadow-sm bg-white overflow-hidden group hover:shadow-md transition-all border border-slate-100">
             <CardHeader className="bg-slate-50/50 border-b border-slate-100 py-4 px-6 flex flex-row items-center justify-between space-y-0">
                <div>
@@ -1303,8 +1422,8 @@ export function HorizontalBalanceSheet() {
   );
 }
 
-const AccountingOverview = ({ accounts }: { accounts: any[] }) => {
-  const typeData = accounts.reduce((acc: any[], curr: any) => {
+const AccountingOverview = ({ accounts = [] }: { accounts: any[] }) => {
+  const typeData = (Array.isArray(accounts) ? accounts : []).reduce((acc: any[], curr: any) => {
     const existing = acc.find(item => item.name === curr.type);
     const balance = Math.abs(curr.balance || 0);
     if (existing) {
@@ -1357,7 +1476,7 @@ const AccountingOverview = ({ accounts }: { accounts: any[] }) => {
           <CardContent className="h-72 pt-6">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={accounts.sort((a,b) => Math.abs(b.balance||0) - Math.abs(a.balance||0)).slice(0, 6)}
+                data={(Array.isArray(accounts) ? [...accounts] : []).sort((a,b) => Math.abs(b.balance||0) - Math.abs(a.balance||0)).slice(0, 6)}
                 layout="vertical"
                 margin={{ top: 0, right: 30, left: 40, bottom: 0 }}
               >
@@ -1377,7 +1496,7 @@ const AccountingOverview = ({ accounts }: { accounts: any[] }) => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-         {accounts.map(acc => (
+         {(Array.isArray(accounts) ? accounts : []).map(acc => (
            <Card key={acc.code} className="border-none bg-white shadow-sm flex flex-col items-center justify-center p-6 space-y-2">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{acc.name}</span>
               <span className="text-xl font-black text-slate-800 tabular-nums">{(acc.balance || 0).toLocaleString()}</span>
@@ -1389,10 +1508,10 @@ const AccountingOverview = ({ accounts }: { accounts: any[] }) => {
   );
 };
 
-function AccountAnalytics({ accounts }: { accounts: any[] }) {
+function AccountAnalytics({ accounts = [] }: { accounts: any[] }) {
   const COLORS = ['#2563eb', '#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#10b981'];
   
-  const typeData = accounts.reduce((acc: any[], curr) => {
+  const typeData = (Array.isArray(accounts) ? accounts : []).reduce((acc: any[], curr) => {
     const existing = acc.find(i => i.name === curr.type);
     if (existing) {
       existing.value += Math.abs(curr.balance || 0);
@@ -1441,7 +1560,7 @@ function AccountAnalytics({ accounts }: { accounts: any[] }) {
           </CardHeader>
           <CardContent className="h-80 pt-6">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={accounts.filter(a => a.type === 'Asset').sort((a,b) => (b.balance||0) - (a.balance||0)).slice(0, 8)}>
+              <BarChart data={(Array.isArray(accounts) ? accounts : []).filter(a => a.type === 'Asset').sort((a,b) => (b.balance||0) - (a.balance||0)).slice(0, 8)}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" fontSize={9} tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
                 <YAxis fontSize={9} tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v/1000}k`} />
@@ -1597,21 +1716,30 @@ const PayableForm = ({ id, onBack }: { id: number | null, onBack: () => void }) 
 
   useEffect(() => {
     const fetchMeta = async () => {
-      const [vRes, aRes, pRes] = await Promise.all([
-        fetch('/api/suppliers'), 
-        fetch('/api/coa'),
-        fetch('/api/projects')
-      ]);
-      setVendors(await vRes.json());
-      const accData = await aRes.json();
-      setAccounts(Array.isArray(accData) ? accData : []);
-      const projData = await pRes.json();
-      setProjects(Array.isArray(projData) ? projData : []);
+      try {
+        const [vRes, aRes, pRes] = await Promise.all([
+          fetch('/api/suppliers'), 
+          fetch('/api/coa'),
+          fetch('/api/projects')
+        ]);
+        const vData = await vRes.json();
+        setVendors(Array.isArray(vData) ? vData : []);
+        const accData = await aRes.json();
+        setAccounts(Array.isArray(accData) ? accData : []);
+        const projData = await pRes.json();
+        setProjects(Array.isArray(projData) ? projData : []);
 
-      if (id) {
-        const bRes = await fetch(`/api/bills/${id}`);
-        const bData = await bRes.json();
-        setFormData(bData);
+        if (id) {
+          const bRes = await fetch(`/api/bills/${id}`);
+          const bData = await bRes.json();
+          setFormData(bData);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('Meta fetch failed:', err);
+        setVendors([]);
+        setAccounts([]);
+        setProjects([]);
         setLoading(false);
       }
     };
@@ -1722,7 +1850,7 @@ const PayableForm = ({ id, onBack }: { id: number | null, onBack: () => void }) 
                   </div>
                   <div className="col-span-4">
                     <Combobox
-                      options={accounts.map(acc => ({ label: `${acc.code} - ${acc.name}`, value: acc.id.toString() }))}
+                      options={(Array.isArray(accounts) ? accounts : []).map(acc => ({ label: `${acc.code} - ${acc.name}`, value: acc.id.toString() }))}
                       value={(item.account_id || "").toString()}
                       onValueChange={v => updateItem(idx, 'account_id', v)}
                       placeholder="Select Account"
@@ -1917,21 +2045,30 @@ const ReceivablesForm = ({ id, onBack }: { id: number | null, onBack: () => void
 
   useEffect(() => {
     const fetchMeta = async () => {
-      const [cRes, aRes, pRes] = await Promise.all([
-        fetch('/api/customers'), 
-        fetch('/api/coa'),
-        fetch('/api/projects')
-      ]);
-      setCustomers(await cRes.json());
-      const accData = await aRes.json();
-      setAccounts(Array.isArray(accData) ? accData : []);
-      const projData = await pRes.json();
-      setProjects(Array.isArray(projData) ? projData : []);
+      try {
+        const [cRes, aRes, pRes] = await Promise.all([
+          fetch('/api/customers'), 
+          fetch('/api/coa'),
+          fetch('/api/projects')
+        ]);
+        const cData = await cRes.json();
+        setCustomers(Array.isArray(cData) ? cData : []);
+        const accData = await aRes.json();
+        setAccounts(Array.isArray(accData) ? accData : []);
+        const projData = await pRes.json();
+        setProjects(Array.isArray(projData) ? projData : []);
 
-      if (id) {
-        const iRes = await fetch(`/api/invoices/${id}`);
-        const iData = await iRes.json();
-        setFormData(iData);
+        if (id) {
+          const iRes = await fetch(`/api/invoices/${id}`);
+          const iData = await iRes.json();
+          setFormData(iData);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('Meta fetch failed:', err);
+        setCustomers([]);
+        setAccounts([]);
+        setProjects([]);
         setLoading(false);
       }
     };
@@ -2042,7 +2179,7 @@ const ReceivablesForm = ({ id, onBack }: { id: number | null, onBack: () => void
                   </div>
                   <div className="col-span-4">
                     <Combobox
-                      options={accounts.map(acc => ({ label: `${acc.code} - ${acc.name}`, value: acc.id.toString() }))}
+                      options={(Array.isArray(accounts) ? accounts : []).map(acc => ({ label: `${acc.code} - ${acc.name}`, value: acc.id.toString() }))}
                       value={(item.account_id || "").toString()}
                       onValueChange={v => updateItem(idx, 'account_id', v)}
                       placeholder="Select Account"
